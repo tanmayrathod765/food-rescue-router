@@ -1,0 +1,126 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Donor {
+  id            String        @id @default(uuid())
+  name          String
+  address       String
+  lat           Float
+  lng           Float
+  contactName   String
+  contactPhone  String
+  email         String        @unique
+  password      String
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  foodPostings  FoodPosting[]
+}
+
+model Driver {
+  id              String      @id @default(uuid())
+  name            String
+  email           String      @unique
+  password        String
+  phone           String
+  vehicleType     VehicleType
+  capacityKg      Float
+  currentLat      Float?
+  currentLng      Float?
+  isAvailable     Boolean     @default(false)
+  trustScore      Float       @default(80.0)
+  totalDeliveries Int         @default(0)
+  totalKgRescued  Float       @default(0)
+  createdAt       DateTime    @default(now())
+  pickups         Pickup[]
+}
+
+model Shelter {
+  id                  String    @id @default(uuid())
+  name                String
+  address             String
+  lat                 Float
+  lng                 Float
+  contactName         String
+  contactPhone        String
+  email               String    @unique
+  password            String
+  maxCapacityKg       Float
+  currentCommittedKg  Float     @default(0)
+  acceptingFrom       String
+  acceptingTill       String
+  isAccepting         Boolean   @default(true)
+  needsVeg            Boolean   @default(true)
+  needsNonVeg         Boolean   @default(true)
+  priorityNote        String?
+  createdAt           DateTime  @default(now())
+  pickups             Pickup[]
+}
+
+model FoodPosting {
+  id            String        @id @default(uuid())
+  donorId       String
+  foodType      FoodType
+  isVeg         Boolean
+  quantityKg    Float
+  description   String?
+  closingTime   DateTime
+  urgencyScore  Float         @default(0)
+  status        PostingStatus @default(AVAILABLE)
+  createdAt     DateTime      @default(now())
+  donor         Donor         @relation(fields: [donorId], references: [id])
+  pickup        Pickup?
+}
+
+model Pickup {
+  id            String       @id @default(uuid())
+  foodPostingId String       @unique
+  driverId      String?
+  shelterId     String?
+  status        PickupStatus @default(PENDING)
+  version       Int          @default(0)
+  routeData     Json?
+  claimedAt     DateTime?
+  pickedUpAt    DateTime?
+  deliveredAt   DateTime?
+  createdAt     DateTime     @default(now())
+  foodPosting   FoodPosting  @relation(fields: [foodPostingId], references: [id])
+  driver        Driver?      @relation(fields: [driverId], references: [id])
+  shelter       Shelter?     @relation(fields: [shelterId], references: [id])
+}
+
+enum VehicleType {
+  BIKE
+  CAR
+  VAN
+  TRUCK
+}
+
+enum FoodType {
+  HOT_MEAL
+  BAKERY
+  SEALED
+  RAW_PRODUCE
+  BEVERAGES
+}
+
+enum PostingStatus {
+  AVAILABLE
+  MATCHED
+  PICKED_UP
+  DELIVERED
+  EXPIRED
+}
+
+enum PickupStatus {
+  PENDING
+  CLAIMED
+  IN_PROGRESS
+  DELIVERED
+  FAILED
+}
