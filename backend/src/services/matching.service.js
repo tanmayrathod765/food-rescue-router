@@ -15,6 +15,15 @@ const { emitToAll } = require('./socket.service')
  * @param {string} foodPostingId
  */
 async function runMatchingForPosting(foodPostingId) {
+  // Expired food check
+if (new Date(foodPosting.closingTime) < new Date()) {
+  await prisma.foodPosting.update({
+    where: { id: foodPostingId },
+    data: { status: 'EXPIRED' }
+  })
+  emitToAll('posting:expired', { foodPostingId })
+  return { success: false, message: 'Food posting has expired' }
+}
   try {
     // Food posting fetch karo
     const foodPosting = await prisma.foodPosting.findUnique({

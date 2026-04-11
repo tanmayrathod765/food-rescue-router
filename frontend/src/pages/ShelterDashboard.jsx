@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api'
 import { useSocket } from '../hooks/useSocket'
 
@@ -22,17 +22,7 @@ export default function ShelterDashboard() {
       .catch(console.error)
   }, [])
 
-  // Pickups fetch karo
-  useEffect(() => {
-    fetchPickups()
-  }, [selectedShelter])
-
-  // Socket events pe refresh
-  useEffect(() => {
-    if (events.length > 0) fetchPickups()
-  }, [events])
-
-  const fetchPickups = async () => {
+  const fetchPickups = useCallback(async () => {
     if (!selectedShelter) return
     try {
       const res = await api.get('/api/pickups')
@@ -49,10 +39,26 @@ export default function ShelterDashboard() {
           p.status === 'DELIVERED'
         )
       )
-    } catch (err) {
-      console.error(err)
+    } catch {
+      console.error('Failed to fetch shelter pickups')
     }
-  }
+  }, [selectedShelter])
+
+  // Pickups fetch karo
+  useEffect(() => {
+    void Promise.resolve().then(() => {
+      fetchPickups()
+    })
+  }, [fetchPickups])
+
+  // Socket events pe refresh
+  useEffect(() => {
+    if (events.length > 0) {
+      void Promise.resolve().then(() => {
+        fetchPickups()
+      })
+    }
+  }, [events, fetchPickups])
 
   const handleAccepting = async () => {
     if (!selectedShelter) return

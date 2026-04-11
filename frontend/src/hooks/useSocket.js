@@ -27,7 +27,9 @@ export const useSocket = () => {
       'pickup:race_condition_blocked',
       'pickup:picked_up',
       'pickup:delivered',
-      'driver:location:update'
+      'driver:location:update',
+      'simulation:log',
+      'simulation:active'
     ]
 
     algorithmEvents.forEach(event => {

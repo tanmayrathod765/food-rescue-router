@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '../utils/api'
+import FoodPassport from '../components/FoodPassport'
 
 export default function RestaurantDashboard() {
   const [donors, setDonors] = useState([])
@@ -303,6 +304,13 @@ export default function RestaurantDashboard() {
                       />
                     </div>
                   </div>
+                  {/* Food Passport */}
+<div className="mt-2">
+  <FoodPassport
+    foodPostingId={posting.id}
+    donorName={posting.donor?.name}
+  />
+</div>
                 </div>
               ))}
             </div>
