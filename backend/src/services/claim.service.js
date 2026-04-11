@@ -56,19 +56,29 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
       const expectedVersion = currentPickup.version
 
       // Step 4: Claim karo — atomic update
-      const updatedPickup = await tx.pickup.update({
+      // updateMany use karo taaki status + version condition safely apply ho.
+      const claimResult = await tx.pickup.updateMany({
         where: {
           foodPostingId: foodPostingId,
-          version: expectedVersion  // Optimistic lock check
+          status: 'PENDING',
+          version: expectedVersion
         },
         data: {
           driverId: driverId,
           shelterId: shelterId,
           status: 'CLAIMED',
-          version: expectedVersion + 1,  // Version increment
+          version: expectedVersion + 1,
           claimedAt: new Date(),
           routeData: routeData
         }
+      })
+
+      if (claimResult.count !== 1) {
+        throw new Error('ALREADY_CLAIMED')
+      }
+
+      const updatedPickup = await tx.pickup.findUnique({
+        where: { foodPostingId: foodPostingId }
       })
 
       // Step 5: Food posting status update karo
@@ -135,7 +145,7 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
  */
 async function markPickedUp(pickupId, driverId) {
   try {
-    const pickup = await prisma.pickup.update({
+    const updateResult = await prisma.pickup.updateMany({
       where: {
         id: pickupId,
         driverId: driverId,
@@ -145,6 +155,14 @@ async function markPickedUp(pickupId, driverId) {
         status: 'IN_PROGRESS',
         pickedUpAt: new Date()
       }
+    })
+
+    if (updateResult.count !== 1) {
+      return { success: false, message: 'Could not update pickup status' }
+    }
+
+    const pickup = await prisma.pickup.findUnique({
+      where: { id: pickupId }
     })
 
     emitToAll('pickup:picked_up', { pickupId, driverId })
