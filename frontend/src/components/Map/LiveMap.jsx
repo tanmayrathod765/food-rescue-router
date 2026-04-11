@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import L from 'leaflet'
 
-// Default marker icon fix
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
   iconRetinaUrl:
@@ -12,7 +11,6 @@ L.Icon.Default.mergeOptions({
     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'
 })
 
-// Custom colored marker
 function createColoredMarker(color, emoji) {
   return L.divIcon({
     html: `
@@ -35,23 +33,59 @@ function createColoredMarker(color, emoji) {
   })
 }
 
+/**
+ * OSRM se real road route fetch karta hai
+ * Free — no API key needed
+ */
+async function fetchRoadRoute(points) {
+  try {
+    if (points.length < 2) return null
+
+    // OSRM format: lng,lat;lng,lat
+    const coords = points
+      .map(p => `${p[1]},${p[0]}`)
+      .join(';')
+
+    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`
+
+    const res = await fetch(url)
+    const data = await res.json()
+
+    if (data.code !== 'Ok' || !data.routes?.[0]) return null
+
+    // GeoJSON coordinates [lng, lat] → Leaflet [lat, lng]
+    const routeCoords = data.routes[0].geometry.coordinates.map(
+      ([lng, lat]) => [lat, lng]
+    )
+
+    return {
+      coords: routeCoords,
+      distance: Math.round(data.routes[0].distance / 1000 * 10) / 10,
+      duration: Math.round(data.routes[0].duration / 60)
+    }
+
+  } catch (err) {
+    console.warn('OSRM route fetch failed:', err)
+    return null
+  }
+}
+
 export default function LiveMap({ drivers, donors, shelters, routes }) {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
   const markersRef = useRef([])
   const routeLinesRef = useRef([])
 
-  // Map initialize karo
+  // Map initialize
   useEffect(() => {
     if (mapInstanceRef.current) return
 
     mapInstanceRef.current = L.map(mapRef.current, {
-      center: [22.7196, 75.8577], // Indore center
+      center: [22.7196, 75.8577],
       zoom: 13,
       zoomControl: true
     })
 
-    // OpenStreetMap tiles (free, no API key)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors'
     }).addTo(mapInstanceRef.current)
@@ -64,11 +98,10 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
     }
   }, [])
 
-  // Markers update karo
+  // Markers update
   useEffect(() => {
     if (!mapInstanceRef.current) return
 
-    // Purane markers hatao
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
 
@@ -157,7 +190,7 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
 
   }, [drivers, donors, shelters])
 
-  // Route lines draw karo
+  // Road routes draw karo — OSRM se
   useEffect(() => {
     if (!mapInstanceRef.current) return
 
@@ -165,16 +198,46 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
     routeLinesRef.current.forEach(l => l.remove())
     routeLinesRef.current = []
 
-    routes.forEach(route => {
+    const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899']
+
+    routes.forEach(async (route, i) => {
       if (!route.points || route.points.length < 2) return
-      const line = L.polyline(route.points, {
-        color: route.color || '#22c55e',
-        weight: 3,
-        opacity: 0.8,
-        dashArray: '8, 4'
-      }).addTo(mapInstanceRef.current)
-      routeLinesRef.current.push(line)
+
+      const color = route.color || colors[i % colors.length]
+
+      // OSRM se real road route fetch karo
+      const roadRoute = await fetchRoadRoute(route.points)
+
+      if (roadRoute && roadRoute.coords.length > 0) {
+        // Real road route — OSRM
+        const line = L.polyline(roadRoute.coords, {
+          color,
+          weight: 4,
+          opacity: 0.85
+        }).addTo(mapInstanceRef.current)
+
+        // Route info popup
+        line.bindPopup(`
+          <div style="font-family:sans-serif">
+            <b>Route Info</b><br/>
+            Distance: ${roadRoute.distance} km<br/>
+            Est. Time: ${roadRoute.duration} min
+          </div>
+        `)
+
+        routeLinesRef.current.push(line)
+      } else {
+        // Fallback — straight line agar OSRM fail ho
+        const line = L.polyline(route.points, {
+          color,
+          weight: 3,
+          opacity: 0.6,
+          dashArray: '8, 4'
+        }).addTo(mapInstanceRef.current)
+        routeLinesRef.current.push(line)
+      }
     })
+
   }, [routes])
 
   return (

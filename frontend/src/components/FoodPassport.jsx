@@ -110,6 +110,12 @@ export default function FoodPassport({ foodPostingId, donorName }) {
                     {passport.status}
                   </span>
                 </div>
+                {donorName && (
+                  <div className="col-span-2">
+                    <span className="text-gray-500">Donor:</span>
+                    <span className="text-white ml-2">{donorName}</span>
+                  </div>
+                )}
               </div>
             </div>
 
