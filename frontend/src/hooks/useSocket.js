@@ -27,6 +27,7 @@ export const useSocket = () => {
       'pickup:race_condition_blocked',
       'pickup:picked_up',
       'pickup:delivered',
+      'impact:report',
       'driver:location:update',
       'simulation:log',
       'simulation:active'

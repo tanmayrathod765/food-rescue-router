@@ -15,7 +15,7 @@
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 const { emitToAll } = require('./socket.service')
-
+const { generateImpactReport } = require('./impact.service')
 /**
  * Atomic Pickup Claim
  * @param {string} foodPostingId
@@ -212,6 +212,9 @@ async function markDelivered(pickupId, driverId) {
       driverId,
       kgRescued: pickup.foodPosting.quantityKg
     })
+
+    // Impact report generate karo
+generateImpactReport(pickupId).catch(console.error)
 
     return { success: true, message: 'Delivery confirmed' }
   } catch (error) {

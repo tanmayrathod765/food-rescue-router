@@ -3,8 +3,12 @@ import RestaurantDashboard from './pages/RestaurantDashboard'
 import DriverDashboard from './pages/DriverDashboard'
 import ShelterDashboard from './pages/ShelterDashboard'
 import AdminDashboard from './pages/AdminDashboard'
+import ImpactNotification from './components/ImpactNotification'
+import { useSocket } from './hooks/useSocket'
 
 function App() {
+  const { events } = useSocket()
+
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-gray-950 text-white">
@@ -48,6 +52,8 @@ function App() {
             </div>
           </div>
         </nav>
+
+        <ImpactNotification events={events} />
 
         {/* Routes */}
         <Routes>

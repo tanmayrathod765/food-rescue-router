@@ -1,13 +1,29 @@
 const errorMiddleware = (err, req, res, next) => {
-  console.error(err.stack)
+  console.error(`[ERROR] ${req.method} ${req.url}:`, err.message)
 
+  // Prisma errors
   if (err.code === 'P2002') {
     return res.status(409).json({
       success: false,
-      message: 'Already exists'
+      message: 'Already exists — duplicate entry'
     })
   }
 
+  if (err.code === 'P2025') {
+    return res.status(404).json({
+      success: false,
+      message: 'Record not found'
+    })
+  }
+
+  if (err.code === 'P2003') {
+    return res.status(400).json({
+      success: false,
+      message: 'Invalid reference — related record not found'
+    })
+  }
+
+  // Custom errors
   if (err.statusCode) {
     return res.status(err.statusCode).json({
       success: false,
@@ -15,9 +31,12 @@ const errorMiddleware = (err, req, res, next) => {
     })
   }
 
+  // Default
   res.status(500).json({
     success: false,
-    message: 'Internal server error'
+    message: process.env.NODE_ENV === 'production'
+      ? 'Internal server error'
+      : err.message
   })
 }
 
