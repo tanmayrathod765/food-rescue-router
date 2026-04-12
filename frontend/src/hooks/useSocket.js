@@ -8,7 +8,16 @@ export const useSocket = () => {
 
   useEffect(() => {
     socketRef.current = io(
-      import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000'
+      import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000',
+      {
+        transports: ['polling'],
+        upgrade: false,
+        withCredentials: true,
+        timeout: 20000,
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000
+      }
     )
 
     socketRef.current.on('connect', () => {
@@ -23,6 +32,7 @@ export const useSocket = () => {
     const algorithmEvents = [
       'matching:driver_found',
       'matching:no_drivers',
+      'matching:no_match',
       'pickup:claimed',
       'pickup:race_condition_blocked',
       'pickup:picked_up',
@@ -30,7 +40,15 @@ export const useSocket = () => {
       'impact:report',
       'driver:location:update',
       'simulation:log',
-      'simulation:active'
+      'simulation:active',
+      'simulation:started',
+      'simulation:completed',
+      'noshow:detected',
+      'noshow:backup_driver',
+      'gamification:badge_earned',
+      'gamification:streak_milestone',
+      'gamification:level_up',
+      'notification:new'
     ]
 
     algorithmEvents.forEach(event => {
