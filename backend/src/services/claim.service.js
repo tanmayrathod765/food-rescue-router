@@ -20,6 +20,8 @@ const {
   checkDriverAchievements,
   checkDonorAchievements
 } = require('./gamification.service')
+const { startNoShowTimer, cancelNoShowTimer } = require('./noshow.service')
+const { notifyDeliveryComplete } = require('./notification.service')
 /**
  * Atomic Pickup Claim
  * @param {string} foodPostingId
@@ -102,6 +104,9 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
       claimedAt: result.claimedAt
     })
 
+    // No-show timer start karo
+    startNoShowTimer(result.id, foodPostingId, driverId)
+
     return {
       success: true,
       message: 'Pickup claimed successfully',
@@ -149,6 +154,9 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
  */
 async function markPickedUp(pickupId, driverId) {
   try {
+
+    // No-show timer cancel karo
+    cancelNoShowTimer(pickupId)
     const updateResult = await prisma.pickup.updateMany({
       where: {
         id: pickupId,
@@ -219,6 +227,11 @@ async function markDelivered(pickupId, driverId) {
 
     // Impact report generate karo
 generateImpactReport(pickupId).catch(console.error)
+notifyDeliveryComplete(
+  pickup.foodPosting.donorId,
+  driverId,
+  pickup.foodPosting.quantityKg
+).catch(console.error)
 // Achievements check karo
 checkDriverAchievements(driverId).catch(console.error)
 checkDonorAchievements(

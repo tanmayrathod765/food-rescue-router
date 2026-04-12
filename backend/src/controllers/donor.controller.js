@@ -37,14 +37,17 @@ const createFoodPosting = async (req, res, next) => {
       closingTime: new Date(closingTime)
     })
 
+    const parsedTimeSinceCooked = parseInt(req.body.timeSinceCooked, 10) || 0
+    const isRefrigerated = Boolean(req.body.isRefrigerated)
+
     // Safety score calculate karo
-const safetyResult = calculateFoodSafetyScore({
-  foodType,
-  timeSinceCooked: parseInt(req.body.timeSinceCooked) || 0,
-  isRefrigerated: req.body.isRefrigerated || false,
-  closingTime: new Date(closingTime),
-  quantityKg: parseFloat(quantityKg)
-})
+    const safetyResult = calculateFoodSafetyScore({
+      foodType,
+      timeSinceCooked: parsedTimeSinceCooked,
+      isRefrigerated,
+      closingTime: new Date(closingTime),
+      quantityKg: parseFloat(quantityKg)
+    })
 
     // Food posting create karo
     const posting = await prisma.foodPosting.create({
@@ -55,10 +58,11 @@ const safetyResult = calculateFoodSafetyScore({
         quantityKg: parseFloat(quantityKg),
         description,
         closingTime: new Date(closingTime),
-        urgencyScore
+        urgencyScore,
+        safetyScore: safetyResult.score,
+        isRefrigerated,
+        timeSinceCooked: parsedTimeSinceCooked
       },
-     safetyScore: safetyResult.score,
-isRefrigerated: req.body.isRefrigerated || false,
     })
 
     // Pickup record create karo

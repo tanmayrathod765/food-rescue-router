@@ -14,7 +14,9 @@ import ShelterDashboard from './pages/ShelterDashboard'
 import AdminDashboard from './pages/AdminDashboard'
 import Landing from './pages/Landing'
 import BadgeNotification from './components/BadgeNotification'
-function NavBar() {
+import NoShowAlert from './components/NoShowAlert'
+import NotificationBell from './components/NotificationBell'
+function NavBar({ events }) {
   const { user, logout } = useAuth()
 
   if (!user) return null
@@ -55,6 +57,8 @@ function NavBar() {
             </Link>
           ))}
 
+          <NotificationBell events={events} />
+
           <div className="flex items-center gap-3 ml-4 pl-4 border-l border-gray-700">
             <div className="text-right">
               <p className="text-white text-sm font-medium">
@@ -81,9 +85,10 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
-      <NavBar />
+      <NavBar events={events} />
       <ImpactNotification events={events} />
 <BadgeNotification events={events} />
+<NoShowAlert events={events} />
       <Routes>
         {/* Public */}
         <Route

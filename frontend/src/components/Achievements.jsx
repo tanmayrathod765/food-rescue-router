@@ -8,7 +8,7 @@ const LEVEL_STYLES = {
   LEGEND:  { emoji: '👑', label: 'Legend',  bg: 'bg-yellow-600' }
 }
 
-export default function Achievements({ entityId, entityType }) {
+export default function Achievements({ entityId }) {
   const [badges, setBadges] = useState([])
   const [streak, setStreak] = useState(null)
   const [loading, setLoading] = useState(true)

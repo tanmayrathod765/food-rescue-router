@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api'
 import { useSocket } from '../hooks/useSocket'
-import { useGPS } from '../hooks/useGPS'
 import { useAuth } from '../context/AuthContext'
 import Achievements from '../components/Achievements'
 import BadgeNotification from '../components/BadgeNotification'
@@ -13,7 +12,7 @@ export default function DriverDashboard() {
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const { connected, events } = useSocket()
-  const { user } = useAuth()
+  useAuth()
   
   // Drivers fetch karo
   useEffect(() => {

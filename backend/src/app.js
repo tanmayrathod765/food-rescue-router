@@ -8,6 +8,7 @@ const shelterRoutes = require('./routes/shelter.routes')
 const pickupRoutes = require('./routes/pickup.routes')
 const adminRoutes = require('./routes/admin.routes')
 const simulationRoutes = require('./routes/simulation.routes')
+const zonesRoutes = require('./routes/zones.routes')
 const app = express()
 const authRoutes = require('./routes/auth.routes')
 const allowedOrigins = [
@@ -31,6 +32,7 @@ app.use(express.json())
 app.use('/api/auth', authRoutes)
 app.use('/api/gamification', gamificationRoutes)
 app.use('/api/simulation', simulationRoutes)
+app.use('/api/zones', zonesRoutes)
 // Health check
 app.get('/health', (req, res) => {
   res.json({

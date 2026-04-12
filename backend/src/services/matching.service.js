@@ -9,7 +9,10 @@ const { findBestDriver } = require('../algorithms/matching/index')
 const { solveTSP } = require('../algorithms/tsp/index')
 const { claimPickup } = require('./claim.service')
 const { emitToAll } = require('./socket.service')
-
+const {
+  notifyDriverNewPickup,
+  notifyDonorPickupConfirmed
+} = require('./notification.service')
 /**
  * Naye food posting ke liye matching run karo
  * @param {string} foodPostingId
@@ -102,6 +105,17 @@ if (new Date(foodPosting.closingTime) < new Date()) {
       allCandidates: matchResult.allCandidates,
       route: routeResult.route
     })
+    
+     // Notifications bhejo
+notifyDriverNewPickup(
+  matchResult.matchedDriver,
+  { quantityKg: foodPosting.quantityKg, foodType: foodPosting.foodType }
+).catch(console.error)
+
+notifyDonorPickupConfirmed(
+  { id: foodPosting.donorId },
+  matchResult.matchedDriver
+).catch(console.error)
 
     return {
       success: true,

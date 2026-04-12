@@ -34,7 +34,10 @@ function calculateUrgencyScore(foodPosting) {
   const typeWeight = FOOD_TYPE_WEIGHTS[foodType] || 0.5
 
   // Quantity factor — zyada food = zyada impact
-  const quantityFactor = Math.min(1.5, 1 + quantityKg / 100)
+  const safeQuantity = Number.isFinite(quantityKg)
+    ? quantityKg
+    : parseFloat(quantityKg) || 0
+  const quantityFactor = Math.min(1.5, 1 + safeQuantity / 100)
 
   // Safety score boost
   const safetyBoost = foodPosting.safetyScore !== undefined
