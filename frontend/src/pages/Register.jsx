@@ -57,6 +57,10 @@ export default function Register() {
       else if (user.role === 'DRIVER') navigate('/driver')
       else if (user.role === 'SHELTER') navigate('/shelter')
     } catch (err) {
+      if (!err.response) {
+        setError('Backend unreachable/CORS blocked. Deployment URL and env check karo')
+        return
+      }
       setError(
         err.response?.data?.message || 'Registration failed'
       )

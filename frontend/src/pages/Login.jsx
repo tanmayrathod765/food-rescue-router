@@ -24,6 +24,10 @@ export default function Login() {
       else if (user.role === 'SHELTER') navigate('/shelter')
       else if (user.role === 'ADMIN') navigate('/admin')
     } catch (err) {
+      if (!err.response) {
+        setError('Backend unreachable/CORS blocked. Deployment URL and env check karo.')
+        return
+      }
       setError(
         err.response?.data?.message || 'Login failed — check credentials'
       )

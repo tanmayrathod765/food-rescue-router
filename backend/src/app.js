@@ -19,7 +19,8 @@ const allowedOrigins = [
 const gamificationRoutes = require('./routes/gamification.routes')
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    const isVercelPreview = origin && /https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
+    if (!origin || allowedOrigins.includes(origin) || isVercelPreview) {
       callback(null, true)
       return
     }
