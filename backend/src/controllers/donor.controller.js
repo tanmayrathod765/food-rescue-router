@@ -2,7 +2,7 @@ const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 const { runMatchingForPosting } = require('../services/matching.service')
 const { calculateUrgencyScore } = require('../algorithms/tsp/urgencyWeight')
-
+const { calculateFoodSafetyScore } = require('../algorithms/foodSafety')
 // GET /api/donors
 const getAllDonors = async (req, res, next) => {
   try {
@@ -37,6 +37,15 @@ const createFoodPosting = async (req, res, next) => {
       closingTime: new Date(closingTime)
     })
 
+    // Safety score calculate karo
+const safetyResult = calculateFoodSafetyScore({
+  foodType,
+  timeSinceCooked: parseInt(req.body.timeSinceCooked) || 0,
+  isRefrigerated: req.body.isRefrigerated || false,
+  closingTime: new Date(closingTime),
+  quantityKg: parseFloat(quantityKg)
+})
+
     // Food posting create karo
     const posting = await prisma.foodPosting.create({
       data: {
@@ -47,7 +56,9 @@ const createFoodPosting = async (req, res, next) => {
         description,
         closingTime: new Date(closingTime),
         urgencyScore
-      }
+      },
+     safetyScore: safetyResult.score,
+isRefrigerated: req.body.isRefrigerated || false,
     })
 
     // Pickup record create karo

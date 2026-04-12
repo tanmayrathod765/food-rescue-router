@@ -5,7 +5,7 @@ import LiveMap from '../components/Map/LiveMap'
 import StatsBar from '../components/StatsBar'
 import AlgorithmPanel from '../components/AlgorithmPanel'
 import SimulationControl from '../components/SimulationControl'
-
+import Leaderboard from '../components/Leaderboard'
 export default function AdminDashboard() {
   const [drivers, setDrivers] = useState([])
   const [donors, setDonors] = useState([])
@@ -123,6 +123,23 @@ export default function AdminDashboard() {
       }
     }
   }, [events, fetchAll])
+
+  // Driver location real-time update
+  useEffect(() => {
+    const locationEvent = events.find(
+      e => e.event === 'driver:location:update'
+    )
+    if (locationEvent) {
+      const { driverId, lat, lng } = locationEvent.data
+      setDrivers(prev =>
+        prev.map(d =>
+          d.id === driverId
+            ? { ...d, currentLat: lat, currentLng: lng }
+            : d
+        )
+      )
+    }
+  }, [events])
 
   useEffect(() => {
     if (events.length === 0) return
@@ -368,7 +385,10 @@ export default function AdminDashboard() {
           </div>
         </div>
       </div>
-
+       {/* Leaderboard */}
+<div className="mt-6">
+  <Leaderboard />
+</div>
       {/* Simulation Control */}
       <div className="mt-6">
         <SimulationControl

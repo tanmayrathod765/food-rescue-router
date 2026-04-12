@@ -129,6 +129,52 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
             Rescued: ${driver.totalKgRescued}kg
           </div>
         `)
+
+      // Driver marker pulse animation (available drivers)
+      if (driver.isAvailable) {
+        const pulseIcon = L.divIcon({
+          html: `
+            <div style="position:relative">
+              <style>
+                @keyframes pulse {
+                  0% { transform: scale(0.95); opacity: 0.9; }
+                  70% { transform: scale(1.2); opacity: 0; }
+                  100% { transform: scale(0.95); opacity: 0; }
+                }
+              </style>
+              <div style="
+                position:absolute;
+                width:50px;height:50px;
+                border-radius:50%;
+                background:rgba(34,197,94,0.3);
+                top:-7px;left:-7px;
+                animation:pulse 2s infinite;
+              "></div>
+              <div style="
+                background:#22c55e;
+                width:36px;height:36px;
+                border-radius:50%;
+                border:3px solid white;
+                display:flex;
+                align-items:center;
+                justify-content:center;
+                font-size:16px;
+                box-shadow:0 2px 8px rgba(0,0,0,0.4);
+                position:relative;z-index:1;
+              ">${
+                driver.vehicleType === 'BIKE' ? '🚲' :
+                driver.vehicleType === 'CAR' ? '🚗' :
+                driver.vehicleType === 'VAN' ? '🚐' : '🚛'
+              }</div>
+            </div>
+          `,
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
+          className: ''
+        })
+        marker.setIcon(pulseIcon)
+      }
+
       markersRef.current.push(marker)
     })
 
@@ -192,7 +238,9 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
 
   // Road routes draw karo — OSRM se
   useEffect(() => {
-    if (!mapInstanceRef.current) return
+    const map = mapInstanceRef.current
+    if (!map) return
+    let cancelled = false
 
     // Purani lines hatao
     routeLinesRef.current.forEach(l => l.remove())
@@ -207,6 +255,7 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
 
       // OSRM se real road route fetch karo
       const roadRoute = await fetchRoadRoute(route.points)
+      if (cancelled || !mapInstanceRef.current) return
 
       if (roadRoute && roadRoute.coords.length > 0) {
         // Real road route — OSRM
@@ -214,7 +263,7 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
           color,
           weight: 4,
           opacity: 0.85
-        }).addTo(mapInstanceRef.current)
+        }).addTo(map)
 
         // Route info popup
         line.bindPopup(`
@@ -233,10 +282,14 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
           weight: 3,
           opacity: 0.6,
           dashArray: '8, 4'
-        }).addTo(mapInstanceRef.current)
+        }).addTo(map)
         routeLinesRef.current.push(line)
       }
     })
+
+    return () => {
+      cancelled = true
+    }
 
   }, [routes])
 

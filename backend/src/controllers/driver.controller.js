@@ -42,16 +42,30 @@ const updateAvailability = async (req, res, next) => {
 const updateLocation = async (req, res, next) => {
   try {
     const { lat, lng } = req.body
+
+    if (!lat || !lng) {
+      return res.status(400).json({
+        success: false,
+        message: 'lat aur lng required'
+      })
+    }
+
     const driver = await prisma.driver.update({
       where: { id: req.params.id },
-      data: { currentLat: lat, currentLng: lng }
+      data: {
+        currentLat: parseFloat(lat),
+        currentLng: parseFloat(lng)
+      }
     })
 
-    // Broadcast location to dashboard
+    // Broadcast to admin map
     emitToAll('driver:location:update', {
       driverId: driver.id,
       driverName: driver.name,
-      lat, lng
+      lat: driver.currentLat,
+      lng: driver.currentLng,
+      vehicleType: driver.vehicleType,
+      isAvailable: driver.isAvailable
     })
 
     res.json({ success: true, data: driver })
@@ -59,7 +73,6 @@ const updateLocation = async (req, res, next) => {
     next(error)
   }
 }
-
 module.exports = {
   getAllDrivers,
   getAvailableDrivers,

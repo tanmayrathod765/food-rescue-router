@@ -1,10 +1,11 @@
 const { PrismaClient } = require('@prisma/client')
+const bcrypt = require('bcryptjs')
+
 const prisma = new PrismaClient()
 
 async function main() {
   console.log('Seeding database...')
 
-  // Donors
   await prisma.donor.createMany({
     data: [
       {
@@ -41,7 +42,6 @@ async function main() {
     skipDuplicates: true
   })
 
-  // Drivers
   await prisma.driver.createMany({
     data: [
       {
@@ -84,7 +84,6 @@ async function main() {
     skipDuplicates: true
   })
 
-  // Shelters
   await prisma.shelter.createMany({
     data: [
       {
@@ -121,6 +120,95 @@ async function main() {
     skipDuplicates: true
   })
 
+  const hashedDemo = await bcrypt.hash('demo123', 12)
+  const hashedAdmin = await bcrypt.hash('admin123', 12)
+
+  const donors = await prisma.donor.findMany()
+  const drivers = await prisma.driver.findMany()
+  const shelters = await prisma.shelter.findMany()
+
+  for (const donor of donors) {
+    await prisma.user.upsert({
+      where: { email: donor.email },
+      update: {
+        password: hashedDemo,
+        role: 'RESTAURANT',
+        entityId: donor.id,
+        isApproved: true,
+        isActive: true
+      },
+      create: {
+        email: donor.email,
+        password: hashedDemo,
+        role: 'RESTAURANT',
+        entityId: donor.id,
+        isApproved: true
+      }
+    })
+  }
+
+  for (const driver of drivers) {
+    await prisma.user.upsert({
+      where: { email: driver.email },
+      update: {
+        password: hashedDemo,
+        role: 'DRIVER',
+        entityId: driver.id,
+        isApproved: true,
+        isActive: true
+      },
+      create: {
+        email: driver.email,
+        password: hashedDemo,
+        role: 'DRIVER',
+        entityId: driver.id,
+        isApproved: true
+      }
+    })
+  }
+
+  for (const shelter of shelters) {
+    await prisma.user.upsert({
+      where: { email: shelter.email },
+      update: {
+        password: hashedDemo,
+        role: 'SHELTER',
+        entityId: shelter.id,
+        isApproved: true,
+        isActive: true
+      },
+      create: {
+        email: shelter.email,
+        password: hashedDemo,
+        role: 'SHELTER',
+        entityId: shelter.id,
+        isApproved: true
+      }
+    })
+  }
+
+  await prisma.user.upsert({
+    where: { email: 'admin@foodrescue.com' },
+    update: {
+      password: hashedAdmin,
+      role: 'ADMIN',
+      entityId: 'admin',
+      isApproved: true,
+      isActive: true
+    },
+    create: {
+      email: 'admin@foodrescue.com',
+      password: hashedAdmin,
+      role: 'ADMIN',
+      entityId: 'admin',
+      isApproved: true
+    }
+  })
+
+  console.log('✅ Admin user created')
+  console.log('   Email: admin@foodrescue.com')
+  console.log('   Password: admin123')
+  console.log('✅ All demo users created')
   console.log('✅ Seeding complete!')
 }
 

@@ -6,7 +6,7 @@ const {
   getDonorPostings
 } = require('../controllers/donor.controller')
 const { generatePassport } = require('../services/passport.service')
-
+const { calculateFoodSafetyScore } = require('../algorithms/foodSafety')
 router.get('/', getAllDonors)
 router.post('/food-posting', createFoodPosting)
 router.get('/:id/postings', getDonorPostings)
@@ -23,5 +23,13 @@ router.get('/passport/:foodPostingId', async (req, res, next) => {
     next(error)
   }
 })
-
+// Safety score calculate
+router.post('/safety-score', (req, res) => {
+  try {
+    const result = calculateFoodSafetyScore(req.body)
+    res.json({ success: true, data: result })
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message })
+  }
+})
 module.exports = router

@@ -1,0 +1,31 @@
+{
+  "name": "Food Rescue Router",
+  "short_name": "FoodRescue",
+  "description": "Real-time food rescue logistics platform",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030712",
+  "theme_color": "#22c55e",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "categories": ["food", "social", "utilities"],
+  "shortcuts": [
+    {
+      "name": "Driver Dashboard",
+      "url": "/driver",
+      "description": "View available pickups"
+    },
+    {
+      "name": "Post Food",
+      "url": "/restaurant",
+      "description": "Post surplus food"
+    }
+  ]
+}

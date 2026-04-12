@@ -1,3 +1,4 @@
+const { safetyToUrgencyBoost } = require('../foodSafety')
 /**
  * Urgency Score Calculator
  * Food ki urgency calculate karta hai based on:
@@ -35,9 +36,12 @@ function calculateUrgencyScore(foodPosting) {
   // Quantity factor — zyada food = zyada impact
   const quantityFactor = Math.min(1.5, 1 + quantityKg / 100)
 
-  // Final score
-  const urgencyScore = timeScore * typeWeight * quantityFactor
+  // Safety score boost
+  const safetyBoost = foodPosting.safetyScore !== undefined
+    ? safetyToUrgencyBoost(foodPosting.safetyScore)
+    : 1.0
 
+  const urgencyScore = timeScore * typeWeight * quantityFactor * safetyBoost
   return Math.min(100, Math.round(urgencyScore * 10) / 10)
 }
 

@@ -1,0 +1,10 @@
+cd "D:\coda\food logistic router\food-rescue-router\frontend"
+node -e "
+const fs = require('fs');
+// Simple 1x1 green pixel PNG (placeholder)
+// Real icon ke liye use any image editor
+const greenPixel = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+fs.writeFileSync('public/icon-192.png', greenPixel);
+fs.writeFileSync('public/icon-512.png', greenPixel);
+console.log('Icons created');
+"

@@ -4,7 +4,7 @@ const { twoOptImprove } = require('../algorithms/tsp/twoOpt')
 const { calculateUrgencyScore } = require('../algorithms/tsp/urgencyWeight')
 const { isWithinTimeWindow } = require('../algorithms/tsp/timeWindows')
 const { solveTSP } = require('../algorithms/tsp/index')
-
+const { calculateFoodSafetyScore } = require('../algorithms/foodSafety')
 // ─────────────────────────────────────
 // Test Data — Indore Locations
 // ─────────────────────────────────────
@@ -145,4 +145,46 @@ describe('Full TSP', () => {
     const result = solveTSP(driver, pickups, shelters)
     expect(result.computeTimeMs).toBeLessThan(1000)
   })
+describe('Food Safety Score', () => {
+  test('Hot meal just cooked should be safe', () => {
+    const result = calculateFoodSafetyScore({
+      foodType: 'HOT_MEAL',
+      timeSinceCooked: 10,
+      isRefrigerated: false,
+      closingTime: new Date(Date.now() + 60 * 60 * 1000),
+      quantityKg: 20
+    })
+    expect(result.score).toBeGreaterThan(50)
+    expect(result.label).toBeDefined()
+  })
+
+  test('Refrigerated food should have higher score', () => {
+    const normal = calculateFoodSafetyScore({
+      foodType: 'HOT_MEAL',
+      timeSinceCooked: 60,
+      isRefrigerated: false,
+      closingTime: new Date(Date.now() + 60 * 60 * 1000),
+      quantityKg: 10
+    })
+    const refrigerated = calculateFoodSafetyScore({
+      foodType: 'HOT_MEAL',
+      timeSinceCooked: 60,
+      isRefrigerated: true,
+      closingTime: new Date(Date.now() + 60 * 60 * 1000),
+      quantityKg: 10
+    })
+    expect(refrigerated.score).toBeGreaterThan(normal.score)
+  })
+
+  test('Sealed food should always be safe', () => {
+    const result = calculateFoodSafetyScore({
+      foodType: 'SEALED',
+      timeSinceCooked: 0,
+      isRefrigerated: false,
+      closingTime: new Date(Date.now() + 60 * 60 * 1000),
+      quantityKg: 5
+    })
+    expect(result.score).toBeGreaterThan(70)
+  })
+})
 })

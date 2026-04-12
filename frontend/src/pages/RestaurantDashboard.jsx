@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api'
 import FoodPassport from '../components/FoodPassport'
+import FoodSafetyBadge from '../components/FoodSafetyBadge'
 
 export default function RestaurantDashboard() {
   const [donors, setDonors] = useState([])
@@ -14,8 +15,40 @@ export default function RestaurantDashboard() {
     isVeg: true,
     quantityKg: '',
     description: '',
-    closingTime: ''
+    closingTime: '',
+    timeSinceCooked: 0,
+    isRefrigerated: false
   })
+
+  const [safetyPreview, setSafetyPreview] = useState(null)
+
+  const fetchSafetyPreview = useCallback(() => {
+    if (!form.quantityKg || !form.closingTime) {
+      setSafetyPreview(null)
+      return
+    }
+
+    api.post('/api/donors/safety-score', {
+      foodType: form.foodType,
+      timeSinceCooked: form.timeSinceCooked,
+      isRefrigerated: form.isRefrigerated,
+      closingTime: form.closingTime,
+      quantityKg: parseFloat(form.quantityKg) || 0
+    })
+      .then(res => setSafetyPreview(res.data.data))
+      .catch(() => {})
+  }, [
+    form.foodType,
+    form.timeSinceCooked,
+    form.isRefrigerated,
+    form.closingTime,
+    form.quantityKg
+  ])
+
+  // Safety score preview
+  useEffect(() => {
+    fetchSafetyPreview()
+  }, [fetchSafetyPreview])
 
   // Donors fetch karo
   useEffect(() => {
@@ -56,8 +89,11 @@ export default function RestaurantDashboard() {
         isVeg: true,
         quantityKg: '',
         description: '',
-        closingTime: ''
+        closingTime: '',
+        timeSinceCooked: 0,
+        isRefrigerated: false
       })
+      setSafetyPreview(null)
       setTimeout(() => setSuccessMsg(''), 4000)
     } catch {
       alert('Error posting food')
@@ -196,6 +232,64 @@ export default function RestaurantDashboard() {
             />
           </div>
 
+          {/* Time Since Cooked */}
+          <div className="mb-4">
+            <label className="text-gray-400 text-sm mb-2 block">
+              Time Since Cooked (minutes)
+            </label>
+            <input
+              type="number"
+              value={form.timeSinceCooked}
+              onChange={e => setForm({
+                ...form,
+                timeSinceCooked: parseInt(e.target.value) || 0
+              })}
+              placeholder="e.g. 30"
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
+            />
+          </div>
+
+          {/* Refrigerated */}
+          <div className="mb-4">
+            <label className="text-gray-400 text-sm mb-2 block">
+              Storage
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setForm({ ...form, isRefrigerated: false })}
+                className={`flex-1 py-3 rounded-lg font-medium transition-all ${
+                  !form.isRefrigerated
+                    ? 'bg-orange-500 text-white'
+                    : 'bg-gray-800 text-gray-400'
+                }`}
+              >
+                🌡️ Room Temp
+              </button>
+              <button
+                onClick={() => setForm({ ...form, isRefrigerated: true })}
+                className={`flex-1 py-3 rounded-lg font-medium transition-all ${
+                  form.isRefrigerated
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-gray-800 text-gray-400'
+                }`}
+              >
+                ❄️ Refrigerated
+              </button>
+            </div>
+          </div>
+
+          {/* Safety Preview */}
+          {safetyPreview && (
+            <div className="mb-4">
+              <FoodSafetyBadge
+                score={safetyPreview.score}
+                label={safetyPreview.label}
+                emoji={safetyPreview.emoji}
+                recommendation={safetyPreview.recommendation}
+              />
+            </div>
+          )}
+
           {/* Description */}
           <div className="mb-6">
             <label className="text-gray-400 text-sm mb-2 block">
@@ -287,6 +381,30 @@ export default function RestaurantDashboard() {
                     )}
                   </div>
 
+                  {/* Safety Badge */}
+                  {posting.safetyScore !== undefined && (
+                    <div className="mt-2">
+                      <FoodSafetyBadge
+                        score={posting.safetyScore}
+                        label={
+                          posting.safetyScore >= 90 ? 'Safe' :
+                          posting.safetyScore >= 70 ? 'Consume Soon' :
+                          posting.safetyScore >= 50 ? 'Urgent' : 'Risk'
+                        }
+                        emoji={
+                          posting.safetyScore >= 90 ? '✅' :
+                          posting.safetyScore >= 70 ? '⚠️' :
+                          posting.safetyScore >= 50 ? '🔶' : '❌'
+                        }
+                        recommendation={
+                          posting.safetyScore >= 90
+                            ? 'Food is fresh'
+                            : 'Deliver as soon as possible'
+                        }
+                      />
+                    </div>
+                  )}
+
                   {/* Urgency Bar */}
                   <div className="mt-3">
                     <div className="flex justify-between text-xs text-gray-500 mb-1">
@@ -304,13 +422,14 @@ export default function RestaurantDashboard() {
                       />
                     </div>
                   </div>
+
                   {/* Food Passport */}
-<div className="mt-2">
-  <FoodPassport
-    foodPostingId={posting.id}
-    donorName={posting.donor?.name}
-  />
-</div>
+                  <div className="mt-2">
+                    <FoodPassport
+                      foodPostingId={posting.id}
+                      donorName={posting.donor?.name}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

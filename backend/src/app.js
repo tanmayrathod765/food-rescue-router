@@ -9,13 +9,13 @@ const pickupRoutes = require('./routes/pickup.routes')
 const adminRoutes = require('./routes/admin.routes')
 const simulationRoutes = require('./routes/simulation.routes')
 const app = express()
-
+const authRoutes = require('./routes/auth.routes')
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'http://localhost:5173',
   'http://127.0.0.1:5173'
 ].filter(Boolean)
-
+const gamificationRoutes = require('./routes/gamification.routes')
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -28,6 +28,8 @@ app.use(cors({
 }))
 app.use(rateLimit(200, 60000))
 app.use(express.json())
+app.use('/api/auth', authRoutes)
+app.use('/api/gamification', gamificationRoutes)
 app.use('/api/simulation', simulationRoutes)
 // Health check
 app.get('/health', (req, res) => {

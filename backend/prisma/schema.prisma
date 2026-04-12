@@ -6,7 +6,24 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  role       Role
+  entityId   String
+  isApproved Boolean  @default(true)
+  isActive   Boolean  @default(true)
+  lastLogin  DateTime?
+  createdAt  DateTime @default(now())
+}
 
+enum Role {
+  RESTAURANT
+  DRIVER
+  SHELTER
+  ADMIN
+}
 model Donor {
   id            String        @id @default(uuid())
   name          String
@@ -38,6 +55,8 @@ model Driver {
   totalKgRescued  Float       @default(0)
   createdAt       DateTime    @default(now())
   pickups         Pickup[]
+  level         String   @default("ROOKIE")
+streakDays    Int      @default(0)
 }
 
 model Shelter {
@@ -75,6 +94,9 @@ model FoodPosting {
   createdAt     DateTime      @default(now())
   donor         Donor         @relation(fields: [donorId], references: [id])
   pickup        Pickup?
+  safetyScore     Float    @default(100)
+isRefrigerated  Boolean  @default(false)
+timeSinceCooked Int      @default(0)
 }
 
 model Pickup {
@@ -92,6 +114,26 @@ model Pickup {
   foodPosting   FoodPosting  @relation(fields: [foodPostingId], references: [id])
   driver        Driver?      @relation(fields: [driverId], references: [id])
   shelter       Shelter?     @relation(fields: [shelterId], references: [id])
+}
+
+model Badge {
+  id          String   @id @default(uuid())
+  entityId    String
+  entityType  String
+  badgeType   String
+  badgeName   String
+  description String
+  earnedAt    DateTime @default(now())
+}
+
+model Streak {
+  id            String   @id @default(uuid())
+  entityId      String   @unique
+  entityType    String
+  currentStreak Int      @default(0)
+  longestStreak Int      @default(0)
+  lastActiveAt  DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 enum VehicleType {

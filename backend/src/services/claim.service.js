@@ -16,6 +16,10 @@ const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 const { emitToAll } = require('./socket.service')
 const { generateImpactReport } = require('./impact.service')
+const {
+  checkDriverAchievements,
+  checkDonorAchievements
+} = require('./gamification.service')
 /**
  * Atomic Pickup Claim
  * @param {string} foodPostingId
@@ -215,6 +219,12 @@ async function markDelivered(pickupId, driverId) {
 
     // Impact report generate karo
 generateImpactReport(pickupId).catch(console.error)
+// Achievements check karo
+checkDriverAchievements(driverId).catch(console.error)
+checkDonorAchievements(
+  pickup.foodPosting.donorId,
+  pickup.foodPosting.quantityKg
+).catch(console.error)
 
     return { success: true, message: 'Delivery confirmed' }
   } catch (error) {

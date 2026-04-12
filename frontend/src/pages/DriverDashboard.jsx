@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import api from '../utils/api'
 import { useSocket } from '../hooks/useSocket'
-
+import { useGPS } from '../hooks/useGPS'
+import { useAuth } from '../context/AuthContext'
+import Achievements from '../components/Achievements'
+import BadgeNotification from '../components/BadgeNotification'
 export default function DriverDashboard() {
   const [drivers, setDrivers] = useState([])
   const [selectedDriver, setSelectedDriver] = useState(null)
@@ -10,7 +13,8 @@ export default function DriverDashboard() {
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const { connected, events } = useSocket()
-
+  const { user } = useAuth()
+  
   // Drivers fetch karo
   useEffect(() => {
     api.get('/api/drivers')
@@ -491,7 +495,17 @@ export default function DriverDashboard() {
           </div>
         </div>
       )}
+       {/* Achievements */}
+{selectedDriver && (
+  <div className="mt-6">
+    <Achievements
+      entityId={selectedDriver.id}
+      entityType="DRIVER"
+    />
+  </div>
+)}
 
+<BadgeNotification events={events} />
       {/* Live Events Log */}
       {events.length > 0 && (
         <div className="mt-6 bg-gray-900 rounded-2xl p-6 border border-gray-800">
