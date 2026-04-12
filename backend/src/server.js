@@ -19,13 +19,15 @@ const server = http.createServer(app)
 const io = new Server(server, {
   cors: {
     origin(origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      const isVercelPreview = origin && /https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)
+      if (!origin || allowedOrigins.includes(origin) || isVercelPreview) {
         callback(null, true)
         return
       }
       callback(new Error('Not allowed by CORS'))
     },
-    methods: ['GET', 'POST']
+    methods: ['GET', 'POST'],
+    credentials: true
   }
 })
 
