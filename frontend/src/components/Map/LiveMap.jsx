@@ -1,5 +1,14 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import L from 'leaflet'
+
+const ROUTE_FETCH_TIMEOUT_MS = 5000
+const ROUTE_FAILURE_COOLDOWN_MS = 30000
+const ROUTE_CACHE_MAX_ENTRIES = 200
+
+const routeCache = new Map()
+const inFlightRouteRequests = new Map()
+const routeFailureCooldownUntil = new Map()
+const warnedRouteFailures = new Set()
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -38,36 +47,85 @@ function createColoredMarker(color, emoji) {
  * Free — no API key needed
  */
 async function fetchRoadRoute(points) {
-  try {
-    if (points.length < 2) return null
+  if (points.length < 2) return null
 
-    // OSRM format: lng,lat;lng,lat
-    const coords = points
-      .map(p => `${p[1]},${p[0]}`)
-      .join(';')
+  const routeKey = buildRouteKey(points)
+  const now = Date.now()
 
-    const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`
+  if (routeCache.has(routeKey)) {
+    return routeCache.get(routeKey)
+  }
 
-    const res = await fetch(url)
-    const data = await res.json()
-
-    if (data.code !== 'Ok' || !data.routes?.[0]) return null
-
-    // GeoJSON coordinates [lng, lat] → Leaflet [lat, lng]
-    const routeCoords = data.routes[0].geometry.coordinates.map(
-      ([lng, lat]) => [lat, lng]
-    )
-
-    return {
-      coords: routeCoords,
-      distance: Math.round(data.routes[0].distance / 1000 * 10) / 10,
-      duration: Math.round(data.routes[0].duration / 60)
-    }
-
-  } catch (err) {
-    console.warn('OSRM route fetch failed:', err)
+  const cooldownUntil = routeFailureCooldownUntil.get(routeKey) || 0
+  if (cooldownUntil > now) {
     return null
   }
+
+  if (inFlightRouteRequests.has(routeKey)) {
+    return inFlightRouteRequests.get(routeKey)
+  }
+
+  const requestPromise = (async () => {
+    let timeoutId = null
+    try {
+      // OSRM format: lng,lat;lng,lat
+      const coords = points
+        .map(p => `${p[1]},${p[0]}`)
+        .join(';')
+
+      const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson`
+
+      const controller = new AbortController()
+      timeoutId = setTimeout(() => {
+        controller.abort()
+      }, ROUTE_FETCH_TIMEOUT_MS)
+
+      const res = await fetch(url, {
+        signal: controller.signal,
+        cache: 'no-store'
+      })
+
+      if (!res.ok) {
+        throw new Error(`OSRM responded with ${res.status}`)
+      }
+
+      const data = await res.json()
+
+      if (data.code !== 'Ok' || !data.routes?.[0]) {
+        throw new Error(`OSRM response code: ${data.code || 'Unknown'}`)
+      }
+
+      // GeoJSON coordinates [lng, lat] → Leaflet [lat, lng]
+      const routeCoords = data.routes[0].geometry.coordinates.map(
+        ([lng, lat]) => [lat, lng]
+      )
+
+      const routeResult = {
+        coords: routeCoords,
+        distance: Math.round(data.routes[0].distance / 1000 * 10) / 10,
+        duration: Math.round(data.routes[0].duration / 60)
+      }
+
+      storeRouteInCache(routeKey, routeResult)
+      routeFailureCooldownUntil.delete(routeKey)
+      return routeResult
+    } catch (err) {
+      routeFailureCooldownUntil.set(routeKey, Date.now() + ROUTE_FAILURE_COOLDOWN_MS)
+
+      if (!warnedRouteFailures.has(routeKey)) {
+        warnedRouteFailures.add(routeKey)
+        console.warn('OSRM route fetch failed; using straight-line fallback for this path.')
+      }
+
+      return null
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId)
+      inFlightRouteRequests.delete(routeKey)
+    }
+  })()
+
+  inFlightRouteRequests.set(routeKey, requestPromise)
+  return requestPromise
 }
 
 export default function LiveMap({ drivers, donors, shelters, routes }) {
@@ -75,6 +133,16 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
   const mapInstanceRef = useRef(null)
   const markersRef = useRef([])
   const routeLinesRef = useRef([])
+  const routeLegend = useMemo(() => {
+    if (!routes || routes.length === 0) return []
+    return routes
+      .filter(route => route?.label)
+      .map((route, index) => ({
+        id: `${route.label}-${index}`,
+        label: route.label,
+        color: route.color || '#22c55e'
+      }))
+  }, [routes])
 
   // Map initialize
   useEffect(() => {
@@ -252,6 +320,7 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
       if (!route.points || route.points.length < 2) return
 
       const color = route.color || colors[i % colors.length]
+      const routeLabel = route.label || `Route ${i + 1}`
 
       // OSRM se real road route fetch karo
       const roadRoute = await fetchRoadRoute(route.points)
@@ -268,7 +337,7 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
         // Route info popup
         line.bindPopup(`
           <div style="font-family:sans-serif">
-            <b>Route Info</b><br/>
+            <b>${routeLabel}</b><br/>
             Distance: ${roadRoute.distance} km<br/>
             Est. Time: ${roadRoute.duration} min
           </div>
@@ -294,9 +363,47 @@ export default function LiveMap({ drivers, donors, shelters, routes }) {
   }, [routes])
 
   return (
-    <div
-      ref={mapRef}
-      style={{ height: '500px', width: '100%', borderRadius: '12px' }}
-    />
+    <div className="relative">
+      <div
+        ref={mapRef}
+        style={{ height: '500px', width: '100%', borderRadius: '12px' }}
+      />
+
+      {routeLegend.length > 0 && (
+        <div className="absolute top-3 right-3 bg-gray-900 bg-opacity-90 border border-gray-700 rounded-lg px-3 py-2 z-[500] shadow-lg">
+          <p className="text-[11px] text-gray-300 font-semibold mb-2">Route Legend</p>
+          <div className="space-y-1.5">
+            {routeLegend.map(item => (
+              <div key={item.id} className="flex items-center gap-2">
+                <span
+                  className="inline-block w-4 h-0.5 rounded-full"
+                  style={{ backgroundColor: item.color }}
+                />
+                <span className="text-[11px] text-gray-200">{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
+}
+
+function roundCoord(value, precision = 4) {
+  const factor = 10 ** precision
+  return Math.round(Number(value) * factor) / factor
+}
+
+function buildRouteKey(points) {
+  return points
+    .map(point => `${roundCoord(point[0])},${roundCoord(point[1])}`)
+    .join('|')
+}
+
+function storeRouteInCache(routeKey, routeValue) {
+  routeCache.set(routeKey, routeValue)
+  if (routeCache.size <= ROUTE_CACHE_MAX_ENTRIES) return
+
+  const oldestKey = routeCache.keys().next().value
+  if (oldestKey) routeCache.delete(oldestKey)
 }

@@ -3,8 +3,7 @@
  * Algorithms ko database ke saath connect karta hai
  */
 
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { findBestDriver } = require('../algorithms/matching/index')
 const { solveTSP } = require('../algorithms/tsp/index')
 const { claimPickup } = require('./claim.service')
@@ -13,20 +12,15 @@ const {
   notifyDriverNewPickup,
   notifyDonorPickupConfirmed
 } = require('./notification.service')
+const {
+  sendDriverPickupAlert,
+  sendRestaurantAlert
+} = require('./sms.service')
 /**
  * Naye food posting ke liye matching run karo
  * @param {string} foodPostingId
  */
 async function runMatchingForPosting(foodPostingId) {
-  // Expired food check
-if (new Date(foodPosting.closingTime) < new Date()) {
-  await prisma.foodPosting.update({
-    where: { id: foodPostingId },
-    data: { status: 'EXPIRED' }
-  })
-  emitToAll('posting:expired', { foodPostingId })
-  return { success: false, message: 'Food posting has expired' }
-}
   try {
     // Food posting fetch karo
     const foodPosting = await prisma.foodPosting.findUnique({
@@ -34,7 +28,18 @@ if (new Date(foodPosting.closingTime) < new Date()) {
       include: { donor: true }
     })
 
-    if (!foodPosting) throw new Error('Food posting not found')
+    if (!foodPosting) {
+      throw new Error('Food posting not found')
+    }
+
+    if (new Date(foodPosting.closingTime) < new Date()) {
+      await prisma.foodPosting.update({
+        where: { id: foodPostingId },
+        data: { status: 'EXPIRED' }
+      })
+      emitToAll('posting:expired', { foodPostingId })
+      return { success: false, message: 'Food posting has expired' }
+    }
 
     // Available drivers fetch karo
     const availableDrivers = await prisma.driver.findMany({
@@ -106,16 +111,26 @@ if (new Date(foodPosting.closingTime) < new Date()) {
       route: routeResult.route
     })
     
-     // Notifications bhejo
-notifyDriverNewPickup(
-  matchResult.matchedDriver,
-  { quantityKg: foodPosting.quantityKg, foodType: foodPosting.foodType }
-).catch(console.error)
+    // Notifications bhejo
+    notifyDriverNewPickup(
+      matchResult.matchedDriver,
+      { quantityKg: foodPosting.quantityKg, foodType: foodPosting.foodType }
+    ).catch(console.error)
 
-notifyDonorPickupConfirmed(
-  { id: foodPosting.donorId },
-  matchResult.matchedDriver
-).catch(console.error)
+    notifyDonorPickupConfirmed(
+      { id: foodPosting.donorId },
+      matchResult.matchedDriver
+    ).catch(console.error)
+
+    sendDriverPickupAlert(matchResult.matchedDriver, {
+      quantityKg: foodPosting.quantityKg,
+      foodType: foodPosting.foodType
+    }).catch(console.error)
+
+    sendRestaurantAlert(
+      { contactPhone: foodPosting.donor.contactPhone },
+      matchResult.matchedDriver
+    ).catch(console.error)
 
     return {
       success: true,

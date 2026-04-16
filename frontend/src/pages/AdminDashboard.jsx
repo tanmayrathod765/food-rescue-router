@@ -12,6 +12,7 @@ export default function AdminDashboard() {
   const [shelters, setShelters] = useState([])
   const [stats, setStats] = useState({})
   const [routes, setRoutes] = useState([])
+  const [pickups, setPickups] = useState([])
   const [raceConditionsBlocked, setRaceConditionsBlocked] = useState(0)
   const { connected, events } = useSocket()
   const [simLogs, setSimLogs] = useState([])
@@ -32,6 +33,7 @@ export default function AdminDashboard() {
       setDrivers(driversRes.data.data)
       setShelters(sheltersRes.data.data)
       setStats(statsRes.data.data)
+      setPickups(pickupsRes.data.data)
 
       // Donors with latest posting
       const donorsWithPostings = donorsRes.data.data.map(donor => {
@@ -395,6 +397,44 @@ export default function AdminDashboard() {
           simLogs={simLogs}
           isActive={simActive}
         />
+      </div>
+
+      <div className="mt-6 bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <h2 className="text-lg font-bold text-green-400 mb-4">📦 Recent Pickup Details</h2>
+        <div className="space-y-3 max-h-80 overflow-y-auto">
+          {pickups.slice(0, 20).map(pickup => {
+            const routeData = pickup.routeData && typeof pickup.routeData === 'object' && !Array.isArray(pickup.routeData)
+              ? pickup.routeData
+              : {}
+            const deliveryPhotoUrl = routeData.deliveryPhotoUrl ? `${api.defaults.baseURL}${routeData.deliveryPhotoUrl}` : null
+
+            return (
+              <div key={pickup.id} className="bg-gray-800 rounded-xl p-3 border border-gray-700">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-white font-medium">
+                    {pickup.foodPosting?.donor?.name || 'Unknown Donor'} → {pickup.shelter?.name || 'Pending Shelter'}
+                  </p>
+                  <span className="text-xs px-2 py-1 rounded-full bg-gray-700 text-gray-200">
+                    {pickup.status}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Driver: {pickup.driver?.name || 'Unassigned'}
+                </p>
+                {deliveryPhotoUrl && (
+                  <a
+                    href={deliveryPhotoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-green-400 hover:text-green-300 mt-2 inline-block"
+                  >
+                    📸 View Delivery Photo Proof
+                  </a>
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

@@ -1,12 +1,11 @@
 require('dotenv').config()
 const http = require('http')
 const { Server } = require('socket.io')
-const { PrismaClient } = require('@prisma/client')
+const prisma = require('./prisma/client')
 const app = require('./app')
 const { initSocket } = require('./services/socket.service')
 
 const PORT = process.env.PORT || 5000
-const prisma = new PrismaClient()
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,

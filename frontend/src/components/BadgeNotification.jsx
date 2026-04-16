@@ -1,42 +1,39 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function BadgeNotification({ events }) {
   const [notification, setNotification] = useState(null)
+  const lastHandledEventIdRef = useRef(0)
 
   useEffect(() => {
-    const badgeEvent = events.find(
-      e => e.event === 'gamification:badge_earned'
-    )
-    const levelEvent = events.find(
-      e => e.event === 'gamification:level_up'
-    )
-    const streakEvent = events.find(
-      e => e.event === 'gamification:streak_milestone'
-    )
+    if (!events || events.length === 0) return
 
-    if (badgeEvent) {
+    const latestEvent = events[0]
+    if (!latestEvent || latestEvent.id === lastHandledEventIdRef.current) return
+    lastHandledEventIdRef.current = latestEvent.id
+
+    if (latestEvent.event === 'gamification:badge_earned') {
       setNotification({
         type: 'badge',
         title: '🏅 Badge Earned!',
-        message: badgeEvent.data.badge.name,
-        desc: badgeEvent.data.badge.description,
+        message: latestEvent.data.badge.name,
+        desc: latestEvent.data.badge.description,
         color: 'border-yellow-500 bg-yellow-900'
       })
       setTimeout(() => setNotification(null), 6000)
-    } else if (levelEvent) {
+    } else if (latestEvent.event === 'gamification:level_up') {
       setNotification({
         type: 'level',
         title: '🎉 Level Up!',
-        message: `${levelEvent.data.levelInfo.emoji} ${levelEvent.data.levelInfo.label}`,
-        desc: `${levelEvent.data.driverName} reached ${levelEvent.data.levelInfo.label} level!`,
+        message: `${latestEvent.data.levelInfo.emoji} ${latestEvent.data.levelInfo.label}`,
+        desc: `${latestEvent.data.driverName} reached ${latestEvent.data.levelInfo.label} level!`,
         color: 'border-purple-500 bg-purple-900'
       })
       setTimeout(() => setNotification(null), 6000)
-    } else if (streakEvent) {
+    } else if (latestEvent.event === 'gamification:streak_milestone') {
       setNotification({
         type: 'streak',
         title: '🔥 Streak Milestone!',
-        message: `${streakEvent.data.streak} Day Streak!`,
+        message: `${latestEvent.data.streak} Day Streak!`,
         desc: 'Keep it up — you\'re on fire!',
         color: 'border-orange-500 bg-orange-900'
       })

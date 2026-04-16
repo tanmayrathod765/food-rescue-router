@@ -5,8 +5,7 @@
  * Backup driver silently alert ho
  */
 
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { emitToAll } = require('./socket.service')
 const { findBestDriver } = require('../algorithms/matching/index')
 
@@ -30,7 +29,8 @@ async function startNoShowTimer(pickupId, foodPostingId, driverId) {
         where: { id: pickupId },
         include: {
           foodPosting: { include: { donor: true } },
-          driver: true
+          driver: true,
+          shelter: true
         }
       })
 
@@ -56,8 +56,19 @@ async function startNoShowTimer(pickupId, foodPostingId, driverId) {
         pickupId,
         driverId,
         driverName: pickup.driver?.name,
+        driverPhone: pickup.driver?.phone,
+        shelterId: pickup.shelterId,
+        shelterName: pickup.shelter?.name,
         foodPostingId
       })
+
+      if (pickup.shelterId) {
+        emitToAll('notification:new', {
+          userId: pickup.shelterId,
+          type: 'NO_SHOW',
+          message: `Driver ${pickup.driver?.name || ''} could not arrive. Backup search started.`.trim()
+        })
+      }
 
       // Backup driver find karo
       const availableDrivers = await prisma.driver.findMany({
@@ -84,9 +95,11 @@ async function startNoShowTimer(pickupId, foodPostingId, driverId) {
       if (backupMatch.success) {
         emitToAll('noshow:backup_driver', {
           pickupId,
+          shelterId: pickup.shelterId,
           backupDriver: {
             id: backupMatch.matchedDriver.id,
-            name: backupMatch.matchedDriver.name
+            name: backupMatch.matchedDriver.name,
+            phone: backupMatch.matchedDriver.phone
           },
           message: `Backup driver ${backupMatch.matchedDriver.name} alerted`
         })
@@ -130,6 +143,16 @@ function cancelNoShowTimer(pickupId) {
 }
 
 /**
+ * Test cleanup helper
+ */
+function clearAllNoShowTimers() {
+  for (const timer of noShowTimers.values()) {
+    clearTimeout(timer)
+  }
+  noShowTimers.clear()
+}
+
+/**
  * No-show risk calculate karo
  */
 function calculateNoShowRisk(driver) {
@@ -143,5 +166,6 @@ function calculateNoShowRisk(driver) {
 module.exports = {
   startNoShowTimer,
   cancelNoShowTimer,
+  clearAllNoShowTimers,
   calculateNoShowRisk
 }

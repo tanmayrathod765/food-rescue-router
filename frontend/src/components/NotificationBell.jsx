@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 export default function NotificationBell({ events }) {
@@ -6,35 +6,37 @@ export default function NotificationBell({ events }) {
   const [notifications, setNotifications] = useState([])
   const [showPanel, setShowPanel] = useState(false)
   const [unread, setUnread] = useState(0)
+  const lastHandledEventIdRef = useRef(0)
 
   useEffect(() => {
-    // User specific notifications
-    const notifEvent = events.find(
-      e => e.event === 'notification:new' &&
-           e.data?.userId === user?.entityId
-    )
+    if (!events || events.length === 0) return
 
-    if (notifEvent) {
-      const newNotif = {
-        id: Date.now(),
-        type: notifEvent.data.type,
-        message: notifEvent.data.message,
-        timestamp: new Date().toLocaleTimeString(),
-        read: false
-      }
-      setNotifications(prev => [newNotif, ...prev].slice(0, 20))
-      setUnread(prev => prev + 1)
+    const latestEvent = events[0]
+    if (!latestEvent || latestEvent.id === lastHandledEventIdRef.current) return
+    lastHandledEventIdRef.current = latestEvent.id
 
-      // Browser push notification
-      if (
-        'Notification' in window &&
-        Notification.permission === 'granted'
-      ) {
-        new Notification('🍱 Food Rescue Router', {
-          body: notifEvent.data.message,
-          icon: '/icon-192.png'
-        })
-      }
+    if (latestEvent.event !== 'notification:new') return
+    if (latestEvent.data?.userId !== user?.entityId) return
+
+    const newNotif = {
+      id: latestEvent.id,
+      type: latestEvent.data.type,
+      message: latestEvent.data.message,
+      timestamp: new Date().toLocaleTimeString(),
+      read: false
+    }
+    setNotifications(prev => [newNotif, ...prev].slice(0, 20))
+    setUnread(prev => prev + 1)
+
+    // Browser push notification
+    if (
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      new Notification('🍱 Food Rescue Router', {
+        body: latestEvent.data.message,
+        icon: '/icon-192.png'
+      })
     }
   }, [events, user])
 

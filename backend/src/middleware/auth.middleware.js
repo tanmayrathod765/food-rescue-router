@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken')
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 
 const JWT_SECRET = process.env.JWT_SECRET || 'foodrescue_secret_123'
 

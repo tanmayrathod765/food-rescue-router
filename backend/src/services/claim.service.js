@@ -12,8 +12,8 @@
  *    doosre ko "already claimed" milta hai
  */
 
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
+const { calculateMatchScore } = require('../algorithms/matching/scoreCalculator')
 const { emitToAll } = require('./socket.service')
 const { generateImpactReport } = require('./impact.service')
 const {
@@ -22,6 +22,49 @@ const {
 } = require('./gamification.service')
 const { startNoShowTimer, cancelNoShowTimer } = require('./noshow.service')
 const { notifyDeliveryComplete } = require('./notification.service')
+
+function getDistanceKm(lat1, lng1, lat2, lng2) {
+  const toRad = value => (value * Math.PI) / 180
+  const earthRadiusKm = 6371
+  const deltaLat = toRad(lat2 - lat1)
+  const deltaLng = toRad(lng2 - lng1)
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return earthRadiusKm * c
+}
+
+function selectBestShelter(shelters, foodPosting, donorLat, donorLng) {
+  const eligible = shelters
+    .map(shelter => {
+      const remainingCapacity = Number(shelter.maxCapacityKg) - Number(shelter.currentCommittedKg || 0)
+      const isVegFood = Boolean(foodPosting.isVeg)
+      const acceptsFood = (isVegFood && shelter.needsVeg) || (!isVegFood && shelter.needsNonVeg)
+      const accepting = Boolean(shelter.isAccepting)
+      const validCapacity = remainingCapacity >= Number(foodPosting.quantityKg)
+
+      if (!accepting || !acceptsFood || !validCapacity) {
+        return null
+      }
+
+      const distanceKm = getDistanceKm(donorLat, donorLng, shelter.lat, shelter.lng)
+      const fillRatio = Number(shelter.currentCommittedKg || 0) / Number(shelter.maxCapacityKg || 1)
+
+      return {
+        shelter,
+        remainingCapacity,
+        distanceKm,
+        fillRatio,
+        score: (remainingCapacity * 10) - (distanceKm * 3) + ((1 - fillRatio) * 15)
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score)
+
+  return eligible[0] || null
+}
 /**
  * Atomic Pickup Claim
  * @param {string} foodPostingId
@@ -32,6 +75,8 @@ const { notifyDeliveryComplete } = require('./notification.service')
  */
 async function claimPickup(foodPostingId, driverId, shelterId, routeData = null) {
   try {
+    let assignedShelterId = shelterId
+
     // PostgreSQL transaction with row-level lock
     const result = await prisma.$transaction(async (tx) => {
       
@@ -39,9 +84,18 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
       // Koi doosra driver yeh row read/modify nahi kar sakta
       // jab tak yeh transaction complete nahi hota
       const pickup = await tx.$queryRaw`
-        SELECT p.*, fp.status as posting_status, fp."quantityKg"
+        SELECT
+          p.*,
+          fp.status as posting_status,
+          fp."quantityKg",
+          fp."closingTime",
+          fp."foodType",
+          fp."isVeg",
+          d.lat as donor_lat,
+          d.lng as donor_lng
         FROM "Pickup" p
         JOIN "FoodPosting" fp ON fp.id = p."foodPostingId"
+        JOIN "Donor" d ON d.id = fp."donorId"
         WHERE p."foodPostingId" = ${foodPostingId}
         FOR UPDATE
        `
@@ -51,6 +105,82 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
       }
 
       const currentPickup = pickup[0]
+
+      if (!assignedShelterId) {
+        const shelters = await tx.shelter.findMany({
+          where: { isAccepting: true }
+        })
+
+        const bestShelter = selectBestShelter(
+          shelters,
+          {
+            quantityKg: Number(currentPickup.quantityKg),
+            isVeg: currentPickup.isVeg
+          },
+          Number(currentPickup.donor_lat),
+          Number(currentPickup.donor_lng)
+        )
+
+        if (!bestShelter) {
+          throw new Error('NO_ELIGIBLE_SHELTER')
+        }
+
+        assignedShelterId = bestShelter.shelter.id
+
+        await tx.shelter.update({
+          where: { id: assignedShelterId },
+          data: {
+            currentCommittedKg: {
+              increment: Number(currentPickup.quantityKg)
+            }
+          }
+        })
+      }
+
+      const driver = await tx.driver.findUnique({
+        where: { id: driverId }
+      })
+
+      if (!driver || !driver.isAvailable) {
+        throw new Error('DRIVER_NOT_AVAILABLE')
+      }
+
+      if (!Number.isFinite(driver.currentLat) || !Number.isFinite(driver.currentLng)) {
+        throw new Error('DRIVER_LOCATION_MISSING')
+      }
+
+      const scoreCheck = calculateMatchScore(driver, {
+        id: foodPostingId,
+        donorLat: Number(currentPickup.donor_lat),
+        donorLng: Number(currentPickup.donor_lng),
+        quantityKg: Number(currentPickup.quantityKg),
+        foodType: currentPickup.foodType,
+        closingTime: currentPickup.closingTime
+      })
+
+      if (scoreCheck.invalid) {
+        throw new Error(`DRIVER_CONSTRAINT_FAILED:${scoreCheck.reason}`)
+      }
+
+      if (shelterId) {
+        const shelter = await tx.shelter.findUnique({
+          where: { id: shelterId }
+        })
+
+        if (!shelter || !shelter.isAccepting) {
+          throw new Error('SHELTER_NOT_ACCEPTING')
+        }
+
+        const remainingCapacity = Number(shelter.maxCapacityKg) - Number(shelter.currentCommittedKg)
+        if (remainingCapacity < Number(currentPickup.quantityKg)) {
+          throw new Error('SHELTER_CAPACITY_EXCEEDED')
+        }
+
+        const isVegFood = Boolean(currentPickup.isVeg)
+        if ((isVegFood && !shelter.needsVeg) || (!isVegFood && !shelter.needsNonVeg)) {
+          throw new Error('SHELTER_FOOD_TYPE_MISMATCH')
+        }
+      }
 
       // Step 2: Check karo — already claimed to nahi?
       if (currentPickup.status !== 'PENDING') {
@@ -71,7 +201,7 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
         },
         data: {
           driverId: driverId,
-          shelterId: shelterId,
+          shelterId: assignedShelterId,
           status: 'CLAIMED',
           version: expectedVersion + 1,
           claimedAt: new Date(),
@@ -100,9 +230,37 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
     emitToAll('pickup:claimed', {
       foodPostingId,
       driverId,
-      shelterId,
+        shelterId: assignedShelterId,
       claimedAt: result.claimedAt
     })
+
+    const assignedPickup = await prisma.pickup.findUnique({
+      where: { id: result.id },
+      include: {
+        foodPosting: {
+          include: {
+            donor: true
+          }
+        },
+        driver: true,
+        shelter: true
+      }
+    })
+
+    if (assignedPickup?.shelterId) {
+      emitToAll('shelter:assigned', {
+        pickupId: assignedPickup.id,
+        shelterId: assignedPickup.shelterId,
+        shelterName: assignedPickup.shelter?.name,
+        driverId: assignedPickup.driverId,
+        driverName: assignedPickup.driver?.name,
+        driverPhone: assignedPickup.driver?.phone,
+        donorName: assignedPickup.foodPosting?.donor?.name,
+        quantityKg: assignedPickup.foodPosting?.quantityKg,
+        foodType: assignedPickup.foodPosting?.foodType,
+        message: 'New food pickup assigned to shelter'
+      })
+    }
 
     // No-show timer start karo
     startNoShowTimer(result.id, foodPostingId, driverId)
@@ -133,6 +291,55 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
       return {
         success: false,
         message: 'Pickup not found'
+      }
+    }
+
+    if (error.message === 'DRIVER_NOT_AVAILABLE') {
+      return {
+        success: false,
+        message: 'Driver is not available for assignment'
+      }
+    }
+
+    if (error.message === 'DRIVER_LOCATION_MISSING') {
+      return {
+        success: false,
+        message: 'Driver live location not found. Please update location first.'
+      }
+    }
+
+    if (error.message.startsWith('DRIVER_CONSTRAINT_FAILED:')) {
+      return {
+        success: false,
+        message: error.message.replace('DRIVER_CONSTRAINT_FAILED:', '')
+      }
+    }
+
+    if (error.message === 'SHELTER_NOT_ACCEPTING') {
+      return {
+        success: false,
+        message: 'Selected shelter is not accepting deliveries right now'
+      }
+    }
+
+    if (error.message === 'SHELTER_CAPACITY_EXCEEDED') {
+      return {
+        success: false,
+        message: 'Selected shelter does not have enough remaining capacity'
+      }
+    }
+
+    if (error.message === 'SHELTER_FOOD_TYPE_MISMATCH') {
+      return {
+        success: false,
+        message: 'Selected shelter cannot accept this food type'
+      }
+    }
+
+    if (error.message === 'NO_ELIGIBLE_SHELTER') {
+      return {
+        success: false,
+        message: 'No eligible shelter available for this pickup'
       }
     }
 

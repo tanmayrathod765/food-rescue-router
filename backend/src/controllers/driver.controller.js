@@ -1,6 +1,41 @@
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { emitToAll } = require('../services/socket.service')
+
+// GET /api/drivers/me
+const getMyProfile = async (req, res, next) => {
+  try {
+    const driver = await prisma.driver.findUnique({
+      where: { id: req.user.entityId },
+      include: {
+        pickups: {
+          include: {
+            foodPosting: {
+              include: { donor: true }
+            },
+            shelter: true
+          },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    })
+
+    if (!driver) {
+      return res.status(404).json({ success: false, message: 'Driver not found' })
+    }
+
+    const activePickup = driver.pickups.find(p => ['CLAIMED', 'IN_PROGRESS'].includes(p.status)) || null
+
+    res.json({
+      success: true,
+      data: {
+        ...driver,
+        activePickup
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+}
 
 // GET /api/drivers
 const getAllDrivers = async (req, res, next) => {
@@ -74,6 +109,7 @@ const updateLocation = async (req, res, next) => {
   }
 }
 module.exports = {
+  getMyProfile,
   getAllDrivers,
   getAvailableDrivers,
   updateAvailability,

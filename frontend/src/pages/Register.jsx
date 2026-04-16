@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import LiveLocationMap from '../components/LiveLocationMap'
 
 const ROLES = [
   { value: 'RESTAURANT', label: 'Restaurant / Bakery', emoji: '🏪' },
@@ -20,6 +21,9 @@ export default function Register() {
   const [selectedRole, setSelectedRole] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [locationError, setLocationError] = useState('')
+  const [liveLocation, setLiveLocation] = useState(null)
   const { register } = useAuth()
   const navigate = useNavigate()
 
@@ -52,7 +56,24 @@ export default function Register() {
     setLoading(true)
     setError('')
     try {
-      const user = await register({ ...form, role: selectedRole })
+      if (selectedRole === 'RESTAURANT' && !liveLocation) {
+        setError('Restaurant signup requires live GPS location. Please allow location access.')
+        setLoading(false)
+        return
+      }
+
+      const payload = {
+        ...form,
+        role: selectedRole
+      }
+
+      if (selectedRole === 'RESTAURANT' && liveLocation) {
+        payload.lat = liveLocation.lat
+        payload.lng = liveLocation.lng
+        payload.address = form.address || 'Live location captured'
+      }
+
+      const user = await register(payload)
       if (user.role === 'RESTAURANT') navigate('/restaurant')
       else if (user.role === 'DRIVER') navigate('/driver')
       else if (user.role === 'SHELTER') navigate('/shelter')
@@ -67,6 +88,34 @@ export default function Register() {
     }
     setLoading(false)
   }
+
+  const captureRestaurantLocation = () => {
+    if (selectedRole !== 'RESTAURANT' || !navigator.geolocation) {
+      setLocationError('Browser geolocation is not available in this device/browser.')
+      return
+    }
+
+    setLocationLoading(true)
+    setLocationError('')
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude, accuracy } = position.coords
+        setLiveLocation({ lat: latitude, lng: longitude, accuracy })
+        setLocationLoading(false)
+      },
+      () => {
+        setLocationError('Location access is required. Please allow GPS and retry.')
+        setLocationLoading(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+
+  useEffect(() => {
+    if (step === 2 && selectedRole === 'RESTAURANT' && !liveLocation && !locationLoading) {
+      captureRestaurantLocation()
+    }
+  }, [step, selectedRole, liveLocation, locationLoading])
 
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
@@ -239,9 +288,55 @@ export default function Register() {
                 </>
               )}
 
-              {/* Restaurant/Shelter address */}
-              {(selectedRole === 'RESTAURANT' ||
-                selectedRole === 'SHELTER') && (
+              {/* Restaurant live location */}
+              {selectedRole === 'RESTAURANT' && (
+                <div className="bg-gray-800 rounded-2xl p-4 border border-gray-700 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-white font-medium">Live Location</p>
+                      <p className="text-gray-400 text-xs">
+                        We will capture your exact browser GPS location automatically.
+                      </p>
+                    </div>
+                  </div>
+
+                  {locationError && (
+                    <div className="bg-red-500 bg-opacity-20 border border-red-500 rounded-lg px-4 py-3 text-red-300 text-sm">
+                      {locationError}
+                    </div>
+                  )}
+
+                  {locationLoading && !liveLocation && (
+                    <div className="bg-gray-900 rounded-xl px-4 py-3 text-gray-300 text-sm border border-gray-700">
+                      Fetching live location...
+                    </div>
+                  )}
+
+                  {locationError && (
+                    <button
+                      type="button"
+                      onClick={captureRestaurantLocation}
+                      disabled={locationLoading}
+                      className="w-full bg-green-500 text-black font-bold px-4 py-2 rounded-xl text-sm disabled:opacity-60"
+                    >
+                      {locationLoading ? 'Retrying GPS...' : 'Retry GPS'}
+                    </button>
+                  )}
+
+                  {liveLocation && (
+                    <LiveLocationMap location={liveLocation} />
+                  )}
+
+                  {!liveLocation && !locationLoading && !locationError && (
+                    <p className="text-gray-500 text-xs">
+                      Click Capture GPS to place your restaurant on the map automatically.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Shelter address */}
+              {selectedRole === 'SHELTER' && (
                 <input
                   type="text"
                   value={form.address}

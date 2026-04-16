@@ -4,8 +4,7 @@
  * Fake drivers, donors, shelters use karte hain
  */
 
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { emitToAll } = require('./socket.service')
 const { findBestDriver } = require('../algorithms/matching/index')
 const { solveTSP } = require('../algorithms/tsp/index')

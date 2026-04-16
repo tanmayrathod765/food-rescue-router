@@ -1,8 +1,37 @@
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { runMatchingForPosting } = require('../services/matching.service')
 const { calculateUrgencyScore } = require('../algorithms/tsp/urgencyWeight')
 const { calculateFoodSafetyScore } = require('../algorithms/foodSafety')
+
+// GET /api/donors/me
+const getMyProfile = async (req, res, next) => {
+  try {
+    const donor = await prisma.donor.findUnique({
+      where: { id: req.user.entityId },
+      include: {
+        foodPostings: {
+          include: {
+            pickup: {
+              include: {
+                driver: true,
+                shelter: true
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    })
+
+    if (!donor) {
+      return res.status(404).json({ success: false, message: 'Donor not found' })
+    }
+
+    res.json({ success: true, data: donor })
+  } catch (error) {
+    next(error)
+  }
+}
 // GET /api/donors
 const getAllDonors = async (req, res, next) => {
   try {
@@ -97,4 +126,72 @@ const getDonorPostings = async (req, res, next) => {
   }
 }
 
-module.exports = { getAllDonors, createFoodPosting, getDonorPostings }
+// PUT /api/donors/:id/location
+const updateLocation = async (req, res, next) => {
+  try {
+    const lat = parseFloat(req.body.lat)
+    const lng = parseFloat(req.body.lng)
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid lat and lng are required'
+      })
+    }
+
+    const donor = await prisma.donor.update({
+      where: { id: req.params.id },
+      data: { lat, lng }
+    })
+
+    res.json({ success: true, data: donor })
+  } catch (error) {
+    next(error)
+  }
+}
+
+// GET /api/donors/:id/impact
+const getDonorImpact = async (req, res, next) => {
+  try {
+    const donor = await prisma.donor.findUnique({
+      where: { id: req.params.id }
+    })
+
+    const deliveredPickups = await prisma.pickup.findMany({
+      where: {
+        status: 'DELIVERED',
+        foodPosting: { donorId: req.params.id }
+      },
+      include: {
+        foodPosting: {
+          select: { quantityKg: true }
+        }
+      }
+    })
+
+    const totalKgDonated = deliveredPickups.reduce((sum, pickup) => {
+      return sum + (pickup.foodPosting?.quantityKg || 0)
+    }, 0)
+
+    res.json({
+      success: true,
+      data: {
+        totalDonations: deliveredPickups.length,
+        totalKgDonated: Math.round(totalKgDonated * 10) / 10,
+        mealsProvided: Math.round(totalKgDonated * 2.5),
+        badgeLevel: donor?.badgeLevel || 'BRONZE'
+      }
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+module.exports = {
+  getAllDonors,
+  getMyProfile,
+  createFoodPosting,
+  getDonorPostings,
+  updateLocation,
+  getDonorImpact
+}

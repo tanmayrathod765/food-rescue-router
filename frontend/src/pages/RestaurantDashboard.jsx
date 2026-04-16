@@ -1,14 +1,52 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
+import { useAuth } from '../context/AuthContext'
+import { useSocket } from '../hooks/useSocket'
 import FoodPassport from '../components/FoodPassport'
 import FoodSafetyBadge from '../components/FoodSafetyBadge'
+import ETADisplay from '../components/ETADisplay'
+import ShelterMiniMap from '../components/ShelterMiniMap'
+
+function getStatusColor(status) {
+  const colors = {
+    AVAILABLE: 'bg-yellow-500',
+    MATCHED: 'bg-blue-500',
+    PICKED_UP: 'bg-purple-500',
+    DELIVERED: 'bg-green-500',
+    EXPIRED: 'bg-red-500'
+  }
+  return colors[status] || 'bg-gray-500'
+}
+
+function getStatusEmoji(status) {
+  const emojis = {
+    AVAILABLE: '⏳',
+    MATCHED: '🚗',
+    PICKED_UP: '📦',
+    DELIVERED: '✅',
+    EXPIRED: '❌'
+  }
+  return emojis[status] || '❓'
+}
 
 export default function RestaurantDashboard() {
-  const [donors, setDonors] = useState([])
-  const [postings, setPostings] = useState([])
+  const { user, logout } = useAuth()
+  const { events } = useSocket()
+  const navigate = useNavigate()
+  const isAdminView = user?.role === 'ADMIN'
+
+  const [myProfile, setMyProfile] = useState(null)
+  const [adminDonors, setAdminDonors] = useState([])
+  const [selectedDonorId, setSelectedDonorId] = useState('')
+  const [myImpact, setMyImpact] = useState(null)
+  const [myBadges, setMyBadges] = useState([])
+  const [donorLeaderboard, setDonorLeaderboard] = useState([])
+  const [deliveryPhotos, setDeliveryPhotos] = useState({})
   const [loading, setLoading] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
-  const [selectedDonor, setSelectedDonor] = useState('')
+  const [safetyPreview, setSafetyPreview] = useState(null)
+  const [profileError, setProfileError] = useState('')
 
   const [form, setForm] = useState({
     foodType: 'HOT_MEAL',
@@ -16,73 +54,197 @@ export default function RestaurantDashboard() {
     quantityKg: '',
     description: '',
     closingTime: '',
-    timeSinceCooked: 0,
+    timeSinceCooked: '0',
     isRefrigerated: false
   })
 
-  const [safetyPreview, setSafetyPreview] = useState(null)
+  const fetchMyProfile = useCallback(async () => {
+    if (user?.role !== 'RESTAURANT') {
+      return
+    }
 
-  const fetchSafetyPreview = useCallback(() => {
+    const res = await api.get('/api/donors/me')
+    setProfileError('')
+    setMyProfile(res.data.data)
+  }, [user?.role])
+
+  const handleProfileError = useCallback((error) => {
+    const status = error?.response?.status
+
+    if (status === 401 || status === 403 || status === 404) {
+      setProfileError('Session mismatch detected. Please login again with a restaurant account.')
+      logout()
+      navigate('/login', { replace: true })
+      return
+    }
+
+    console.error(error)
+  }, [logout, navigate])
+
+  const fetchAdminDonors = useCallback(async () => {
+    if (!isAdminView) return
+
+    const res = await api.get('/api/donors')
+    const donors = res.data.data || []
+    setAdminDonors(donors)
+
+    if (!selectedDonorId && donors.length > 0) {
+      setSelectedDonorId(donors[0].id)
+    }
+  }, [isAdminView, selectedDonorId])
+
+  const fetchAdminSelectedDonor = useCallback(async () => {
+    if (!isAdminView || !selectedDonorId) return
+
+    const donorMeta = adminDonors.find(d => d.id === selectedDonorId)
+    const postingsRes = await api.get(`/api/donors/${selectedDonorId}/postings`)
+
+    setMyProfile({
+      ...(donorMeta || {}),
+      foodPostings: postingsRes.data.data || []
+    })
+    setProfileError('')
+  }, [isAdminView, selectedDonorId, adminDonors])
+
+  const fetchDeliveryPhoto = useCallback(async (pickupId) => {
+    try {
+      const res = await api.get(`/api/pickups/${pickupId}/delivery-photo`)
+      if (res.data.photoUrl) {
+        setDeliveryPhotos(prev => ({
+          ...prev,
+          [pickupId]: `${api.defaults.baseURL}${res.data.photoUrl}`
+        }))
+      }
+    } catch {
+      // Ignore missing photo and keep waiting state.
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isAdminView) {
+      fetchAdminDonors().catch(console.error)
+      return
+    }
+
+    fetchMyProfile().catch(handleProfileError)
+  }, [fetchMyProfile, handleProfileError, isAdminView, fetchAdminDonors])
+
+  useEffect(() => {
+    if (!isAdminView) return
+    fetchAdminSelectedDonor().catch(console.error)
+  }, [isAdminView, fetchAdminSelectedDonor])
+
+  useEffect(() => {
+    if (isAdminView) {
+      const interval = setInterval(() => {
+        fetchAdminDonors().catch(console.error)
+        fetchAdminSelectedDonor().catch(console.error)
+      }, 30000)
+      return () => clearInterval(interval)
+    }
+
+    if (user?.role !== 'RESTAURANT') return
+
+    const interval = setInterval(() => {
+      fetchMyProfile().catch(handleProfileError)
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [
+    fetchMyProfile,
+    handleProfileError,
+    user?.role,
+    isAdminView,
+    fetchAdminDonors,
+    fetchAdminSelectedDonor
+  ])
+
+  useEffect(() => {
+    const targetDonorId = isAdminView ? selectedDonorId : user?.entityId
+    if (!targetDonorId) return
+
+    api.get(`/api/donors/${targetDonorId}/impact`)
+      .then(res => setMyImpact(res.data.data))
+      .catch(console.error)
+  }, [user, isAdminView, selectedDonorId])
+
+  useEffect(() => {
+    if (!user?.entityId || isAdminView) return
+    api.get(`/api/gamification/badges/${user.entityId}`)
+      .then(res => setMyBadges(res.data.data || []))
+      .catch(console.error)
+  }, [user, isAdminView])
+
+  useEffect(() => {
+    api.get('/api/gamification/leaderboard/donors')
+      .then(res => setDonorLeaderboard(res.data.data || []))
+      .catch(console.error)
+  }, [])
+
+  useEffect(() => {
     if (!form.quantityKg || !form.closingTime) {
       setSafetyPreview(null)
       return
     }
 
+    const timeSinceCookedMinutes = (parseFloat(form.timeSinceCooked) || 0) * 60
     api.post('/api/donors/safety-score', {
       foodType: form.foodType,
-      timeSinceCooked: form.timeSinceCooked,
+      timeSinceCooked: timeSinceCookedMinutes,
       isRefrigerated: form.isRefrigerated,
       closingTime: form.closingTime,
       quantityKg: parseFloat(form.quantityKg) || 0
     })
       .then(res => setSafetyPreview(res.data.data))
-      .catch(() => {})
-  }, [
-    form.foodType,
-    form.timeSinceCooked,
-    form.isRefrigerated,
-    form.closingTime,
-    form.quantityKg
-  ])
+      .catch(() => setSafetyPreview(null))
+  }, [form])
 
-  // Safety score preview
   useEffect(() => {
-    fetchSafetyPreview()
-  }, [fetchSafetyPreview])
+    const postings = myProfile?.foodPostings || []
+    postings.forEach(posting => {
+      if (posting.status === 'DELIVERED' && posting.pickup?.id) {
+        fetchDeliveryPhoto(posting.pickup.id)
+      }
+    })
+  }, [myProfile, fetchDeliveryPhoto])
 
-  // Donors fetch karo
   useEffect(() => {
-    api.get('/api/donors')
-      .then(res => {
-        setDonors(res.data.data)
-        if (res.data.data.length > 0) {
-          setSelectedDonor(res.data.data[0].id)
-        }
-      })
-      .catch(console.error)
-  }, [])
+    if (!events.length) return
 
-  // Postings fetch karo jab donor change ho
-  useEffect(() => {
-    if (!selectedDonor) return
-    api.get(`/api/donors/${selectedDonor}/postings`)
-      .then(res => setPostings(res.data.data))
-      .catch(console.error)
-  }, [selectedDonor, successMsg])
+    const photoEvent = events.find(e => e.event === 'delivery:photo_uploaded')
+    if (photoEvent?.data?.pickupId) {
+      fetchDeliveryPhoto(photoEvent.data.pickupId)
+    }
+
+    const otpEvent = events.find(e => e.event === 'otp:generated' || e.event === 'otp:restaurant_notified' || e.event === 'otp:verified')
+    if (otpEvent) {
+      if (isAdminView) {
+        fetchAdminSelectedDonor().catch(console.error)
+      } else {
+        fetchMyProfile().catch(handleProfileError)
+      }
+    }
+  }, [events, fetchDeliveryPhoto, fetchAdminSelectedDonor, fetchMyProfile, handleProfileError, isAdminView])
 
   const handleSubmit = async () => {
-    if (!form.quantityKg || !form.closingTime) {
-      alert('Quantity aur closing time required hai!')
+    if (!myProfile?.id || !form.quantityKg || !form.closingTime) {
+      alert('Quantity and closing time are required')
       return
     }
 
     setLoading(true)
     try {
       await api.post('/api/donors/food-posting', {
-        donorId: selectedDonor,
-        ...form,
-        quantityKg: parseFloat(form.quantityKg)
+        donorId: myProfile.id,
+        foodType: form.foodType,
+        isVeg: form.isVeg,
+        quantityKg: parseFloat(form.quantityKg),
+        description: form.description,
+        closingTime: form.closingTime,
+        isRefrigerated: form.isRefrigerated,
+        timeSinceCooked: (parseFloat(form.timeSinceCooked) || 0) * 60
       })
+
+      await fetchMyProfile()
       setSuccessMsg('Food posted successfully! Matching in progress...')
       setForm({
         foodType: 'HOT_MEAL',
@@ -90,7 +252,7 @@ export default function RestaurantDashboard() {
         quantityKg: '',
         description: '',
         closingTime: '',
-        timeSinceCooked: 0,
+        timeSinceCooked: '0',
         isRefrigerated: false
       })
       setSafetyPreview(null)
@@ -101,71 +263,117 @@ export default function RestaurantDashboard() {
     setLoading(false)
   }
 
-  const getStatusColor = (status) => {
-    const colors = {
-      AVAILABLE: 'bg-yellow-500',
-      MATCHED: 'bg-blue-500',
-      PICKED_UP: 'bg-purple-500',
-      DELIVERED: 'bg-green-500',
-      EXPIRED: 'bg-red-500'
-    }
-    return colors[status] || 'bg-gray-500'
-  }
+  const postings = myProfile?.foodPostings || []
 
-  const getStatusEmoji = (status) => {
-    const emojis = {
-      AVAILABLE: '⏳',
-      MATCHED: '🚗',
-      PICKED_UP: '📦',
-      DELIVERED: '✅',
-      EXPIRED: '❌'
+  if (user?.role && user.role !== 'RESTAURANT') {
+    if (user.role === 'ADMIN') {
+      // Admin can preview all restaurant data.
+    } else {
+    return (
+      <div className="max-w-4xl mx-auto p-6">
+        <div className="bg-yellow-500 bg-opacity-10 border border-yellow-500 rounded-xl p-4 text-yellow-300">
+          Restaurant dashboard is available for restaurant accounts only. Please login as a restaurant user.
+        </div>
+      </div>
+    )
     }
-    return emojis[status] || '❓'
   }
 
   return (
-    <div className="max-w-6xl mx-auto p-6">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">
-          🏪 Restaurant Dashboard
-        </h1>
+    <div className="max-w-7xl mx-auto p-6">
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold text-white mb-2">🏪 Restaurant Dashboard</h1>
         <p className="text-gray-400">
-          Post surplus food for rescue — drivers will be automatically matched
+          {isAdminView
+            ? 'Admin view: browse all restaurants and their live postings.'
+            : 'Post surplus food, track driver progress, and verify delivery.'}
         </p>
+        {profileError && (
+          <p className="text-red-400 text-sm mt-2">{profileError}</p>
+        )}
+      </div>
+
+      {isAdminView && (
+        <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-6">
+          <label className="text-gray-400 text-sm mb-2 block">Select Restaurant</label>
+          <select
+            value={selectedDonorId}
+            onChange={e => setSelectedDonorId(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
+          >
+            {adminDonors.map(donor => (
+              <option key={donor.id} value={donor.id}>
+                {donor.name} ({donor.email})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 mb-6">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-green-500 bg-opacity-20 rounded-xl flex items-center justify-center text-2xl">🏪</div>
+          <div>
+            <h2 className="text-xl font-bold text-white">{myProfile?.name || 'Loading profile...'}</h2>
+            <p className="text-gray-400 text-sm">
+              {myProfile?.address || 'Fetching location...'}
+            </p>
+            {Number.isFinite(Number(myProfile?.lat)) && Number.isFinite(Number(myProfile?.lng)) && (
+              <p className="text-gray-500 text-xs mt-1">
+                Lat: {Number(myProfile.lat).toFixed(5)}, Lng: {Number(myProfile.lng).toFixed(5)}
+              </p>
+            )}
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs bg-green-500 bg-opacity-20 text-green-400 px-3 py-1 rounded-full border border-green-500 border-opacity-30">
+              {isAdminView ? '● Admin Preview Mode' : '● Restaurant Account'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        <div className="bg-gray-900 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-green-400">{myImpact?.totalKgDonated || 0}kg</div>
+          <div className="text-gray-400 text-xs">Total Donated</div>
+        </div>
+        <div className="bg-gray-900 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-blue-400">~{Math.round((myImpact?.totalKgDonated || 0) * 2.5)}</div>
+          <div className="text-gray-400 text-xs">Meals Provided</div>
+        </div>
+        <div className="bg-gray-900 rounded-xl p-4 text-center">
+          <div className="text-2xl font-bold text-purple-400">{myImpact?.totalDonations || 0}</div>
+          <div className="text-gray-400 text-xs">Total Donations</div>
+        </div>
+      </div>
+
+      <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 mb-6">
+        <h3 className="text-sm font-bold text-gray-400 mb-3">🏅 My Badges</h3>
+        {myBadges.length === 0 ? (
+          <p className="text-gray-600 text-sm">Make your first donation to earn badges!</p>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {myBadges.map(badge => (
+              <div key={badge.id} className="flex-shrink-0 bg-gray-800 rounded-xl p-3 text-center w-24">
+                <div className="text-2xl">{String(badge.badgeName || '').split(' ')[0]}</div>
+                <div className="text-white text-xs mt-1">
+                  {String(badge.badgeName || '').split(' ').slice(1).join(' ')}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        {/* Post Food Form */}
         <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-          <h2 className="text-xl font-bold text-green-400 mb-6">
-            📦 Post Surplus Food
-          </h2>
+          <h2 className="text-xl font-bold text-green-400 mb-6">📦 Post Surplus Food</h2>
 
-          {/* Donor Select */}
           <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Select Restaurant
-            </label>
-            <select
-              value={selectedDonor}
-              onChange={e => setSelectedDonor(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
-            >
-              {donors.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Food Type */}
-          <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Food Type
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Food Type</label>
             <select
               value={form.foodType}
-              onChange={e => setForm({ ...form, foodType: e.target.value })}
+              onChange={e => setForm(prev => ({ ...prev, foodType: e.target.value }))}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
             >
               <option value="HOT_MEAL">🍛 Hot Meal</option>
@@ -176,28 +384,21 @@ export default function RestaurantDashboard() {
             </select>
           </div>
 
-          {/* Veg/Non-veg */}
           <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Dietary Type
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Dietary Type</label>
             <div className="flex gap-3">
               <button
-                onClick={() => setForm({ ...form, isVeg: true })}
+                onClick={() => setForm(prev => ({ ...prev, isVeg: true }))}
                 className={`flex-1 py-3 rounded-lg font-medium transition-all ${
-                  form.isVeg
-                    ? 'bg-green-500 text-white'
-                    : 'bg-gray-800 text-gray-400'
+                  form.isVeg ? 'bg-green-500 text-white' : 'bg-gray-800 text-gray-400'
                 }`}
               >
                 🟢 Vegetarian
               </button>
               <button
-                onClick={() => setForm({ ...form, isVeg: false })}
+                onClick={() => setForm(prev => ({ ...prev, isVeg: false }))}
                 className={`flex-1 py-3 rounded-lg font-medium transition-all ${
-                  !form.isVeg
-                    ? 'bg-red-500 text-white'
-                    : 'bg-gray-800 text-gray-400'
+                  !form.isVeg ? 'bg-red-500 text-white' : 'bg-gray-800 text-gray-400'
                 }`}
               >
                 🔴 Non-Veg
@@ -205,72 +406,56 @@ export default function RestaurantDashboard() {
             </div>
           </div>
 
-          {/* Quantity */}
           <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Quantity (kg)
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Quantity (kg)</label>
             <input
               type="number"
               value={form.quantityKg}
-              onChange={e => setForm({ ...form, quantityKg: e.target.value })}
+              onChange={e => setForm(prev => ({ ...prev, quantityKg: e.target.value }))}
               placeholder="e.g. 20"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
             />
           </div>
 
-          {/* Closing Time */}
           <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Closing Time (Pickup Deadline)
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Closing Time (Pickup Deadline)</label>
             <input
               type="datetime-local"
               value={form.closingTime}
-              onChange={e => setForm({ ...form, closingTime: e.target.value })}
+              onChange={e => setForm(prev => ({ ...prev, closingTime: e.target.value }))}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
             />
           </div>
 
-          {/* Time Since Cooked */}
           <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Time Since Cooked (minutes)
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Time Since Cooked (hours)</label>
             <input
               type="number"
               value={form.timeSinceCooked}
-              onChange={e => setForm({
-                ...form,
-                timeSinceCooked: parseInt(e.target.value) || 0
-              })}
-              placeholder="e.g. 30"
+              onChange={e => setForm(prev => ({ ...prev, timeSinceCooked: e.target.value }))}
+              placeholder="e.g. 2"
+              min="0"
+              max="24"
+              step="0.5"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
             />
           </div>
 
-          {/* Refrigerated */}
           <div className="mb-4">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Storage
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Storage</label>
             <div className="flex gap-3">
               <button
-                onClick={() => setForm({ ...form, isRefrigerated: false })}
+                onClick={() => setForm(prev => ({ ...prev, isRefrigerated: false }))}
                 className={`flex-1 py-3 rounded-lg font-medium transition-all ${
-                  !form.isRefrigerated
-                    ? 'bg-orange-500 text-white'
-                    : 'bg-gray-800 text-gray-400'
+                  !form.isRefrigerated ? 'bg-orange-500 text-white' : 'bg-gray-800 text-gray-400'
                 }`}
               >
                 🌡️ Room Temp
               </button>
               <button
-                onClick={() => setForm({ ...form, isRefrigerated: true })}
+                onClick={() => setForm(prev => ({ ...prev, isRefrigerated: true }))}
                 className={`flex-1 py-3 rounded-lg font-medium transition-all ${
-                  form.isRefrigerated
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-gray-800 text-gray-400'
+                  form.isRefrigerated ? 'bg-blue-500 text-white' : 'bg-gray-800 text-gray-400'
                 }`}
               >
                 ❄️ Refrigerated
@@ -278,7 +463,6 @@ export default function RestaurantDashboard() {
             </div>
           </div>
 
-          {/* Safety Preview */}
           {safetyPreview && (
             <div className="mb-4">
               <FoodSafetyBadge
@@ -290,42 +474,34 @@ export default function RestaurantDashboard() {
             </div>
           )}
 
-          {/* Description */}
           <div className="mb-6">
-            <label className="text-gray-400 text-sm mb-2 block">
-              Notes (optional)
-            </label>
+            <label className="text-gray-400 text-sm mb-2 block">Notes (optional)</label>
             <input
               type="text"
               value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
+              onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
               placeholder="e.g. Contains nuts, handle carefully"
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
             />
           </div>
 
-          {/* Success Message */}
           {successMsg && (
             <div className="mb-4 bg-green-500 bg-opacity-20 border border-green-500 rounded-lg px-4 py-3 text-green-400">
               ✅ {successMsg}
             </div>
           )}
 
-          {/* Submit */}
           <button
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || !myProfile}
             className="w-full bg-green-500 hover:bg-green-400 disabled:bg-gray-700 text-black font-bold py-4 rounded-xl transition-all text-lg"
           >
             {loading ? '⏳ Posting...' : '🚀 Post Food for Rescue'}
           </button>
         </div>
 
-        {/* Recent Postings */}
         <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800">
-          <h2 className="text-xl font-bold text-green-400 mb-6">
-            📋 Recent Postings
-          </h2>
+          <h2 className="text-xl font-bold text-green-400 mb-6">📋 My Recent Postings</h2>
 
           {postings.length === 0 ? (
             <div className="text-center text-gray-500 py-12">
@@ -334,106 +510,209 @@ export default function RestaurantDashboard() {
               <p className="text-sm mt-2">Post your first food rescue!</p>
             </div>
           ) : (
-            <div className="space-y-4 max-h-[600px] overflow-y-auto">
-              {postings.map(posting => (
-                <div
-                  key={posting.id}
-                  className="bg-gray-800 rounded-xl p-4 border border-gray-700"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-lg">
-                        {posting.foodType === 'HOT_MEAL' ? '🍛' :
-                         posting.foodType === 'BAKERY' ? '🥐' :
-                         posting.foodType === 'SEALED' ? '📦' :
-                         posting.foodType === 'RAW_PRODUCE' ? '🥦' : '🥤'}
-                      </span>
-                      <span className="font-medium text-white">
-                        {posting.foodType.replace('_', ' ')}
-                      </span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full text-white ${
-                        posting.isVeg ? 'bg-green-600' : 'bg-red-600'
-                      }`}>
-                        {posting.isVeg ? 'VEG' : 'NON-VEG'}
-                      </span>
-                    </div>
-                    <span className={`text-xs px-3 py-1 rounded-full text-white ${getStatusColor(posting.status)}`}>
-                      {getStatusEmoji(posting.status)} {posting.status}
-                    </span>
-                  </div>
+            <div className="space-y-4 max-h-[900px] overflow-y-auto pr-1">
+              {postings.map(posting => {
+                const minutesLeft = Math.round((new Date(posting.closingTime) - Date.now()) / 60000)
 
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="text-gray-400">
-                      ⚖️ {posting.quantityKg} kg
+                return (
+                  <div
+                    key={posting.id}
+                    className="bg-gray-800 rounded-xl p-4 border border-gray-700"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">
+                          {posting.foodType === 'HOT_MEAL' ? '🍛' : posting.foodType === 'BAKERY' ? '🥐' : posting.foodType === 'SEALED' ? '📦' : posting.foodType === 'RAW_PRODUCE' ? '🥦' : '🥤'}
+                        </span>
+                        <span className="font-medium text-white">{posting.foodType.replace('_', ' ')}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full text-white ${posting.isVeg ? 'bg-green-600' : 'bg-red-600'}`}>
+                          {posting.isVeg ? 'VEG' : 'NON-VEG'}
+                        </span>
+                      </div>
+                      <span className={`text-xs px-3 py-1 rounded-full text-white ${getStatusColor(posting.status)}`}>
+                        {getStatusEmoji(posting.status)} {posting.status}
+                      </span>
                     </div>
-                    <div className="text-gray-400">
-                      ⏰ {new Date(posting.closingTime).toLocaleTimeString()}
+
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="text-gray-400">⚖️ {posting.quantityKg} kg</div>
+                      <div className="text-gray-400">⏰ {new Date(posting.closingTime).toLocaleTimeString()}</div>
                     </div>
+
+                    {minutesLeft < 30 && minutesLeft > 0 && (
+                      <div className="text-red-400 text-xs mt-1 animate-pulse">⚠️ Expires in {minutesLeft} minutes!</div>
+                    )}
+                    {minutesLeft <= 0 && (
+                      <div className="text-gray-500 text-xs mt-1">⏰ Expired</div>
+                    )}
+
                     {posting.pickup?.driver && (
-                      <div className="text-blue-400 col-span-2">
-                        🚗 Driver: {posting.pickup.driver.name}
+                      <div className="mt-3 bg-blue-500 bg-opacity-10 border border-blue-500 border-opacity-30 rounded-xl p-3">
+                        <p className="text-blue-400 text-xs font-bold mb-2">🚗 DRIVER ASSIGNED</p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div>
+                            <span className="text-gray-400 text-xs">Driver:</span>
+                            <p className="text-white font-medium">{posting.pickup.driver.name}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Vehicle:</span>
+                            <p className="text-white">{posting.pickup.driver.vehicleType}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Trust Score:</span>
+                            <p className="text-green-400">{posting.pickup.driver.trustScore}/100</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Phone:</span>
+                            <p className="text-white">{posting.pickup.driver.phone}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Live Location:</span>
+                            <p className="text-white text-xs">
+                              {Number.isFinite(posting.pickup.driver.currentLat) && Number.isFinite(posting.pickup.driver.currentLng)
+                                ? `${posting.pickup.driver.currentLat.toFixed(4)}, ${posting.pickup.driver.currentLng.toFixed(4)}`
+                                : 'Updating...'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {posting.pickup.driver.phone && (
+                          <a
+                            href={`tel:${posting.pickup.driver.phone}`}
+                            className="inline-flex mt-3 items-center gap-2 text-xs bg-blue-500 bg-opacity-20 text-blue-300 px-3 py-1.5 rounded-full border border-blue-500 border-opacity-40"
+                          >
+                            📞 Call Driver
+                          </a>
+                        )}
+
+                        <ETADisplay
+                          driverLat={posting.pickup.driver.currentLat}
+                          driverLng={posting.pickup.driver.currentLng}
+                          donorLat={myProfile?.lat}
+                          donorLng={myProfile?.lng}
+                        />
                       </div>
                     )}
+
                     {posting.pickup?.shelter && (
-                      <div className="text-purple-400 col-span-2">
-                        🏠 Shelter: {posting.pickup.shelter.name}
+                      <div className="mt-2 bg-purple-500 bg-opacity-10 border border-purple-500 border-opacity-30 rounded-xl p-3">
+                        <p className="text-purple-400 text-xs font-bold mb-2">🏠 DELIVERY DESTINATION</p>
+                        <div className="grid grid-cols-2 gap-2 text-sm">
+                          <div>
+                            <span className="text-gray-400 text-xs">Shelter:</span>
+                            <p className="text-white font-medium">{posting.pickup.shelter.name}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Address:</span>
+                            <p className="text-white text-xs">{posting.pickup.shelter.address}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Location:</span>
+                            <p className="text-white text-xs">
+                              {Number.isFinite(posting.pickup.shelter.lat) && Number.isFinite(posting.pickup.shelter.lng)
+                                ? `${posting.pickup.shelter.lat.toFixed(4)}, ${posting.pickup.shelter.lng.toFixed(4)}`
+                                : 'Location unavailable'}
+                            </p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Contact:</span>
+                            <p className="text-white">{posting.pickup.shelter.contactName}</p>
+                          </div>
+                          <div>
+                            <span className="text-gray-400 text-xs">Accepts Till:</span>
+                            <p className="text-white">{posting.pickup.shelter.acceptingTill}</p>
+                          </div>
+                        </div>
+                        {myProfile && <ShelterMiniMap shelter={posting.pickup.shelter} donor={myProfile} />}
                       </div>
                     )}
-                  </div>
 
-                  {/* Safety Badge */}
-                  {posting.safetyScore !== undefined && (
+                    {posting.status === 'MATCHED' && posting.pickup?.id && (
+                      <div className="mt-3 bg-yellow-500 bg-opacity-10 border border-yellow-500 border-opacity-30 rounded-xl p-3">
+                        <p className="text-yellow-400 text-xs font-bold mb-2">🔑 OTP FLOW</p>
+                        {posting.pickup?.routeData?.restaurantOtpCode ? (
+                          <>
+                            <p className="text-gray-300 text-xs">Use this OTP to verify assigned driver pickup:</p>
+                            <div className="mt-2 bg-yellow-500 bg-opacity-10 border border-yellow-500 rounded-lg px-3 py-2">
+                              <p className="text-yellow-300 text-xs">Restaurant OTP:</p>
+                              <p className="text-yellow-400 font-bold tracking-widest">{posting.pickup.routeData.restaurantOtpCode}</p>
+                            </div>
+                            <p className="text-gray-400 text-xs mt-1">Share this OTP only after driver identity confirmation.</p>
+                          </>
+                        ) : posting.pickup?.routeData?.restaurantOtpVerifiedAt ? (
+                          <p className="text-green-300 text-xs">✅ OTP verified. Pickup handoff completed.</p>
+                        ) : (
+                          <p className="text-gray-300 text-xs">Waiting for driver to generate OTP in app...</p>
+                        )}
+                      </div>
+                    )}
+
+                    {posting.status === 'DELIVERED' && posting.pickup?.id && (
+                      <div className="mt-3">
+                        {deliveryPhotos[posting.pickup.id] ? (
+                          <div>
+                            <p className="text-gray-400 text-xs mb-2">📸 Delivery Proof:</p>
+                            <img
+                              src={deliveryPhotos[posting.pickup.id]}
+                              alt="Delivery proof"
+                              className="w-full rounded-xl border border-gray-700 max-h-48 object-cover"
+                            />
+                            <p className="text-green-400 text-xs mt-1">
+                              ✅ Verified delivery by {posting.pickup?.driver?.name}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-gray-600 text-xs">📸 Waiting for delivery photo from driver...</p>
+                        )}
+                      </div>
+                    )}
+
+                    {posting.safetyScore !== undefined && (
+                      <div className="mt-3">
+                        <FoodSafetyBadge
+                          score={posting.safetyScore}
+                          label={posting.safetyScore >= 90 ? 'Safe' : posting.safetyScore >= 70 ? 'Consume Soon' : posting.safetyScore >= 50 ? 'Urgent' : 'Risk'}
+                          emoji={posting.safetyScore >= 90 ? '✅' : posting.safetyScore >= 70 ? '⚠️' : posting.safetyScore >= 50 ? '🔶' : '❌'}
+                          recommendation={posting.safetyScore >= 90 ? 'Food is fresh' : 'Deliver as soon as possible'}
+                        />
+                      </div>
+                    )}
+
                     <div className="mt-2">
-                      <FoodSafetyBadge
-                        score={posting.safetyScore}
-                        label={
-                          posting.safetyScore >= 90 ? 'Safe' :
-                          posting.safetyScore >= 70 ? 'Consume Soon' :
-                          posting.safetyScore >= 50 ? 'Urgent' : 'Risk'
-                        }
-                        emoji={
-                          posting.safetyScore >= 90 ? '✅' :
-                          posting.safetyScore >= 70 ? '⚠️' :
-                          posting.safetyScore >= 50 ? '🔶' : '❌'
-                        }
-                        recommendation={
-                          posting.safetyScore >= 90
-                            ? 'Food is fresh'
-                            : 'Deliver as soon as possible'
-                        }
-                      />
-                    </div>
-                  )}
-
-                  {/* Urgency Bar */}
-                  <div className="mt-3">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                      <span>Urgency</span>
-                      <span>{Math.round(posting.urgencyScore)}/100</span>
-                    </div>
-                    <div className="w-full bg-gray-700 rounded-full h-1.5">
-                      <div
-                        className={`h-1.5 rounded-full ${
-                          posting.urgencyScore > 70 ? 'bg-red-500' :
-                          posting.urgencyScore > 40 ? 'bg-yellow-500' :
-                          'bg-green-500'
-                        }`}
-                        style={{ width: `${Math.min(100, posting.urgencyScore)}%` }}
+                      <FoodPassport
+                        foodPostingId={posting.id}
+                        donorName={myProfile?.name}
                       />
                     </div>
                   </div>
-
-                  {/* Food Passport */}
-                  <div className="mt-2">
-                    <FoodPassport
-                      foodPostingId={posting.id}
-                      donorName={posting.donor?.name}
-                    />
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="mt-6 bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <h3 className="text-sm font-bold text-gray-400 mb-3">🏆 Donor Leaderboard</h3>
+        <div className="space-y-2">
+          {donorLeaderboard.map(donor => (
+            <div
+              key={donor.id}
+              className={`flex items-center gap-3 p-3 rounded-xl ${
+                donor.id === user?.entityId
+                  ? 'bg-green-500 bg-opacity-10 border border-green-500 border-opacity-30'
+                  : 'bg-gray-800'
+              }`}
+            >
+              <span className="text-lg w-8 text-center">
+                {donor.rank === 1 ? '🥇' : donor.rank === 2 ? '🥈' : donor.rank === 3 ? '🥉' : `#${donor.rank}`}
+              </span>
+              <span className={`flex-1 text-sm font-medium ${donor.id === user?.entityId ? 'text-green-400' : 'text-white'}`}>
+                {donor.name} {donor.id === user?.entityId ? '(You)' : ''}
+              </span>
+              <span className="text-green-400 text-sm font-bold">{donor.totalKgDonated}kg</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>

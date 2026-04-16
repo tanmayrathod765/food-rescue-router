@@ -1,5 +1,4 @@
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { claimPickup, markPickedUp, markDelivered } = require('../services/claim.service')
 const { runMatchingForPosting } = require('../services/matching.service')
 
@@ -23,7 +22,8 @@ const getAllPickups = async (req, res, next) => {
 // POST /api/pickups/claim
 const claim = async (req, res, next) => {
   try {
-    const { foodPostingId, driverId, shelterId } = req.body
+    const { foodPostingId, shelterId } = req.body
+    const driverId = req.user?.role === 'DRIVER' ? req.user.entityId : req.body.driverId
 
     if (!foodPostingId || !driverId) {
       return res.status(400).json({
@@ -52,7 +52,7 @@ const claim = async (req, res, next) => {
 const pickedUp = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { driverId } = req.body
+    const driverId = req.user?.role === 'DRIVER' ? req.user.entityId : req.body.driverId
     const result = await markPickedUp(id, driverId)
     res.json(result)
   } catch (error) {
@@ -64,7 +64,34 @@ const pickedUp = async (req, res, next) => {
 const delivered = async (req, res, next) => {
   try {
     const { id } = req.params
-    const { driverId } = req.body
+    const driverId = req.user?.role === 'DRIVER' ? req.user.entityId : req.body.driverId
+
+    const pickup = await prisma.pickup.findUnique({
+      where: { id }
+    })
+
+    if (!pickup) {
+      return res.status(404).json({ success: false, message: 'Pickup not found' })
+    }
+
+    const routeData = pickup.routeData && typeof pickup.routeData === 'object' && !Array.isArray(pickup.routeData)
+      ? pickup.routeData
+      : {}
+
+    if (!routeData.deliveryOtpVerifiedAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery OTP verification is required before marking delivered'
+      })
+    }
+
+    if (!routeData.deliveryPhotoUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Delivery proof photo is required before marking delivered'
+      })
+    }
+
     const result = await markDelivered(id, driverId)
     res.json(result)
   } catch (error) {

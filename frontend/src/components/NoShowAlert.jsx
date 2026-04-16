@@ -1,25 +1,29 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 export default function NoShowAlert({ events }) {
   const [alert, setAlert] = useState(null)
+  const lastHandledEventIdRef = useRef(0)
 
   useEffect(() => {
-    const noshow = events.find(e => e.event === 'noshow:detected')
-    const backup = events.find(e => e.event === 'noshow:backup_driver')
+    if (!events || events.length === 0) return
 
-    if (noshow) {
+    const latestEvent = events[0]
+    if (!latestEvent || latestEvent.id === lastHandledEventIdRef.current) return
+    lastHandledEventIdRef.current = latestEvent.id
+
+    if (latestEvent.event === 'noshow:detected') {
       setAlert({
         type: 'noshow',
-        message: `⚠️ No-show: ${noshow.data.driverName} did not pick up`,
+        message: `⚠️ No-show: ${latestEvent.data.driverName} did not pick up`,
         sub: 'Trust score penalized. Finding backup driver...',
         color: 'border-red-500 bg-red-900'
       })
       setTimeout(() => setAlert(null), 6000)
-    } else if (backup) {
+    } else if (latestEvent.event === 'noshow:backup_driver') {
       setAlert({
         type: 'backup',
-        message: `✅ Backup: ${backup.data.backupDriver.name} alerted`,
-        sub: backup.data.message,
+        message: `✅ Backup: ${latestEvent.data.backupDriver.name} alerted`,
+        sub: latestEvent.data.message,
         color: 'border-blue-500 bg-blue-900'
       })
       setTimeout(() => setAlert(null), 5000)

@@ -1,13 +1,79 @@
 import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import api from '../utils/api'
+import LiveLocationMap from '../components/LiveLocationMap'
+
+const DEMO_LOGINS = [
+  {
+    role: 'RESTAURANT',
+    email: 'pizzahut@demo.com',
+    password: 'demo123',
+    emoji: '🏪',
+    color: 'bg-orange-500'
+  },
+  {
+    role: 'DRIVER',
+    email: 'amit@demo.com',
+    password: 'demo123',
+    emoji: '🚗',
+    color: 'bg-blue-500'
+  },
+  {
+    role: 'SHELTER',
+    email: 'shelter1@demo.com',
+    password: 'demo123',
+    emoji: '🏠',
+    color: 'bg-purple-500'
+  },
+  {
+    role: 'ADMIN',
+    email: 'admin@foodrescue.com',
+    password: 'admin123',
+    emoji: '📊',
+    color: 'bg-green-500'
+  }
+]
+
+function isDemoAccountEmail(email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase()
+  return DEMO_LOGINS.some(demo => demo.email.toLowerCase() === normalizedEmail)
+}
 
 export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showLocationModal, setShowLocationModal] = useState(false)
+  const [loggedInUser, setLoggedInUser] = useState(null)
+  const [locationLoading, setLocationLoading] = useState(false)
+  const [locationError, setLocationError] = useState('')
+  const [liveLocation, setLiveLocation] = useState(null)
   const { login } = useAuth()
   const navigate = useNavigate()
+
+  const redirectUser = (role) => {
+    if (role === 'RESTAURANT') navigate('/restaurant')
+    else if (role === 'DRIVER') navigate('/driver')
+    else if (role === 'SHELTER') navigate('/shelter')
+    else navigate('/admin')
+  }
+
+  const saveRoleLocation = async (user, lat, lng) => {
+    if (!user?.entityId) return
+
+    if (user.role === 'DRIVER') {
+      await api.put(`/api/drivers/${user.entityId}/location`, { lat, lng })
+      return
+    }
+    if (user.role === 'RESTAURANT') {
+      await api.put(`/api/donors/${user.entityId}/location`, { lat, lng })
+      return
+    }
+    if (user.role === 'SHELTER') {
+      await api.put(`/api/shelters/${user.entityId}/location`, { lat, lng })
+    }
+  }
 
   const handleLogin = async () => {
     if (!form.email || !form.password) {
@@ -18,55 +84,101 @@ export default function Login() {
     setError('')
     try {
       const user = await login(form.email, form.password)
-      // Role ke hisaab se redirect
-      if (user.role === 'RESTAURANT') navigate('/restaurant')
-      else if (user.role === 'DRIVER') navigate('/driver')
-      else if (user.role === 'SHELTER') navigate('/shelter')
-      else if (user.role === 'ADMIN') navigate('/admin')
+      const skipLiveLocationForDemo = isDemoAccountEmail(form.email)
+
+      if (skipLiveLocationForDemo) {
+        setLoading(false)
+        redirectUser(user.role)
+        return
+      }
+
+      if (navigator.geolocation) {
+        setShowLocationModal(true)
+        setLoggedInUser(user)
+        setLocationLoading(true)
+        setLocationError('')
+        navigator.geolocation.getCurrentPosition(
+          async (position) => {
+            try {
+              const { latitude, longitude } = position.coords
+              setLiveLocation({
+                lat: latitude,
+                lng: longitude,
+                accuracy: position.coords.accuracy
+              })
+              await saveRoleLocation(user, latitude, longitude)
+            } catch (locationError) {
+              console.error(locationError)
+            }
+            setLocationLoading(false)
+            setLoading(false)
+          },
+          () => {
+            setLocationError('Location access is required. Please allow browser location access and tap Retry.')
+            setLocationLoading(false)
+            setLoading(false)
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        )
+        return
+      }
+
+      setLoading(false)
+      redirectUser(user.role)
     } catch (err) {
       if (!err.response) {
         setError('Backend unreachable/CORS blocked. Deployment URL and env check karo.')
+        setLoading(false)
         return
       }
       setError(
         err.response?.data?.message || 'Login failed — check credentials'
       )
+      setLoading(false)
     }
-    setLoading(false)
+  }
+
+  const handleConfirmLocation = async () => {
+    if (!loggedInUser || !liveLocation) return
+
+    setLocationLoading(true)
+    try {
+      await saveRoleLocation(loggedInUser, liveLocation.lat, liveLocation.lng)
+      setShowLocationModal(false)
+      redirectUser(loggedInUser.role)
+    } catch (error) {
+      console.error(error)
+      setLocationError('Could not save live location. Please retry.')
+    } finally {
+      setLocationLoading(false)
+    }
+  }
+
+  const handleRetryLocation = () => {
+    if (!loggedInUser || !navigator.geolocation) return
+
+    setLocationLoading(true)
+    setLocationError('')
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude, accuracy } = position.coords
+          setLiveLocation({ lat: latitude, lng: longitude, accuracy })
+          await saveRoleLocation(loggedInUser, latitude, longitude)
+        } catch (error) {
+          console.error(error)
+        }
+        setLocationLoading(false)
+      },
+      () => {
+        setLocationError('Browser location permission is still blocked. Enable it in site settings and retry.')
+        setLocationLoading(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
   }
 
   // Demo credentials
-  const demoLogins = [
-    {
-      role: 'RESTAURANT',
-      email: 'pizzahut@demo.com',
-      password: 'demo123',
-      emoji: '🏪',
-      color: 'bg-orange-500'
-    },
-    {
-      role: 'DRIVER',
-      email: 'amit@demo.com',
-      password: 'demo123',
-      emoji: '🚗',
-      color: 'bg-blue-500'
-    },
-    {
-      role: 'SHELTER',
-      email: 'shelter1@demo.com',
-      password: 'demo123',
-      emoji: '🏠',
-      color: 'bg-purple-500'
-    },
-    {
-      role: 'ADMIN',
-      email: 'admin@foodrescue.com',
-      password: 'admin123',
-      emoji: '📊',
-      color: 'bg-green-500'
-    }
-  ]
-
   return (
     <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -147,7 +259,7 @@ export default function Login() {
             🎮 Demo Quick Login
           </h3>
           <div className="grid grid-cols-2 gap-3">
-            {demoLogins.map(demo => (
+            {DEMO_LOGINS.map(demo => (
               <button
                 key={demo.role}
                 onClick={() => {
@@ -174,6 +286,52 @@ export default function Login() {
           </p>
         </div>
       </div>
+
+      {showLocationModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-900 rounded-2xl p-6 border border-gray-800 max-w-md w-full">
+            <h3 className="text-white font-bold text-lg mb-2">📍 Use Your Live Location</h3>
+            <p className="text-gray-400 text-sm mb-4">
+              We will use your browser GPS and show it on the map. No manual entry.
+            </p>
+
+            {locationLoading && !liveLocation && (
+              <div className="bg-gray-800 rounded-xl p-4 border border-gray-700 text-gray-300 text-sm mb-4">
+                Detecting your live location...
+              </div>
+            )}
+
+            {locationError && (
+              <div className="bg-red-500 bg-opacity-20 border border-red-500 rounded-xl px-4 py-3 text-red-300 text-sm mb-4">
+                {locationError}
+              </div>
+            )}
+
+            {liveLocation && (
+              <div className="bg-gray-800 rounded-xl p-3 border border-gray-700 mb-4">
+                <LiveLocationMap location={liveLocation} />
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleRetryLocation}
+                disabled={locationLoading}
+                className="flex-1 bg-gray-800 text-white font-bold py-3 rounded-xl border border-gray-700 disabled:opacity-60"
+              >
+                {locationLoading ? 'Retrying...' : 'Retry GPS'}
+              </button>
+              <button
+                onClick={handleConfirmLocation}
+                disabled={!liveLocation || locationLoading}
+                className="flex-1 bg-green-500 text-black font-bold py-3 rounded-xl disabled:bg-gray-700 disabled:text-gray-400"
+              >
+                Use Location
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

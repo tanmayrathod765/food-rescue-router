@@ -3,8 +3,7 @@
  * Browser push notifications + in-app notifications
  */
 
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
 const { emitToAll } = require('./socket.service')
 
 /**

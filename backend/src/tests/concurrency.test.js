@@ -1,11 +1,12 @@
 const { claimPickup } = require('../services/claim.service')
-const { PrismaClient } = require('@prisma/client')
-const prisma = new PrismaClient()
+const prisma = require('../prisma/client')
+const { clearAllNoShowTimers } = require('../services/noshow.service')
 
 // ─────────────────────────────────────
 // Test Data Setup
 // ─────────────────────────────────────
 let testDonorId, testDriverId1, testDriverId2
+let testLowCapacityDriverId
 let testPostingId, testShelterId
 
 beforeAll(async () => {
@@ -57,6 +58,22 @@ beforeAll(async () => {
   })
   testDriverId2 = driver2.id
 
+  const lowCapacityDriver = await prisma.driver.create({
+    data: {
+      name: 'Low Capacity Driver',
+      email: `lowcapacity_${Date.now()}@test.com`,
+      password: 'test123',
+      phone: '9999999994',
+      vehicleType: 'BIKE',
+      capacityKg: 5,
+      currentLat: 22.74,
+      currentLng: 75.88,
+      isAvailable: true,
+      trustScore: 80
+    }
+  })
+  testLowCapacityDriverId = lowCapacityDriver.id
+
   // Test shelter
   const shelter = await prisma.shelter.create({
     data: {
@@ -78,6 +95,7 @@ beforeAll(async () => {
 
 // Cleanup after tests
 afterAll(async () => {
+  clearAllNoShowTimers()
   await prisma.pickup.deleteMany({
     where: { foodPosting: { donorId: testDonorId } }
   })
@@ -85,6 +103,7 @@ afterAll(async () => {
   await prisma.donor.delete({ where: { id: testDonorId } })
   await prisma.driver.delete({ where: { id: testDriverId1 } })
   await prisma.driver.delete({ where: { id: testDriverId2 } })
+  await prisma.driver.delete({ where: { id: testLowCapacityDriverId } })
   await prisma.shelter.delete({ where: { id: testShelterId } })
   await prisma.$disconnect()
 })
@@ -169,6 +188,18 @@ describe('Concurrency — Race Condition Prevention', () => {
     // Version 1 hona chahiye (ek update hua)
     expect(pickup.version).toBe(1)
     expect(pickup.status).toBe('CLAIMED')
+  }, 10000)
+
+  test('Driver with insufficient capacity cannot be assigned', async () => {
+    const posting = await createTestPosting()
+    const result = await claimPickup(
+      posting.id,
+      testLowCapacityDriverId,
+      testShelterId
+    )
+
+    expect(result.success).toBe(false)
+    expect(result.message).toContain('Vehicle capacity')
   }, 10000)
 
 })

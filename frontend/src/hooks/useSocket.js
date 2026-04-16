@@ -3,6 +3,7 @@ import { io } from 'socket.io-client'
 
 export const useSocket = () => {
   const socketRef = useRef(null)
+  const eventCounterRef = useRef(0)
   const [connected, setConnected] = useState(false)
   const [events, setEvents] = useState([])
 
@@ -48,12 +49,24 @@ export const useSocket = () => {
       'gamification:badge_earned',
       'gamification:streak_milestone',
       'gamification:level_up',
-      'notification:new'
+      'notification:new',
+      'otp:generated',
+      'otp:restaurant_notified',
+      'otp:verified',
+      'otp:delivery_generated',
+      'otp:delivery_verified',
+      'delivery:photo_uploaded',
+      'sms:log',
+      'shelter:assigned',
+      'shelter:driver_reported'
     ]
 
     algorithmEvents.forEach(event => {
       socketRef.current.on(event, (data) => {
+        const eventId = eventCounterRef.current + 1
+        eventCounterRef.current = eventId
         setEvents(prev => [{
+          id: eventId,
           event,
           data,
           timestamp: new Date().toLocaleTimeString()
