@@ -127,7 +127,7 @@ export default function Login() {
       redirectUser(user.role)
     } catch (err) {
       if (!err.response) {
-        setError('Backend unreachable/CORS blocked. Deployment URL and env check karo.')
+        setError('Backend unreachable/CORS blocked. Vercel env me VITE_API_URL and VITE_SOCKET_URL ko backend URL pe set karo.')
         setLoading(false)
         return
       }

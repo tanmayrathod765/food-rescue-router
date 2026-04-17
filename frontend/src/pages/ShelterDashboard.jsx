@@ -562,6 +562,21 @@ export default function ShelterDashboard() {
                 const routeData = pickup.routeData && typeof pickup.routeData === 'object' && !Array.isArray(pickup.routeData)
                   ? pickup.routeData
                   : {}
+                const deliveryOtpVerified = Boolean(routeData.deliveryOtpVerifiedAt)
+                const deliveryPhotoUploaded = Boolean(routeData.deliveryPhotoUrl)
+                const restaurantPhotoVerified = Boolean(routeData.deliveryPhotoVerifiedAt)
+
+                let deliveryBlockReason = null
+                if (pickup.status === 'IN_PROGRESS') {
+                  if (!deliveryOtpVerified) {
+                    deliveryBlockReason = 'Waiting for driver to verify shelter OTP'
+                  } else if (!deliveryPhotoUploaded) {
+                    deliveryBlockReason = 'Waiting for driver to upload delivery photo'
+                  } else if (!restaurantPhotoVerified) {
+                    deliveryBlockReason = 'Waiting for restaurant to verify delivery photo'
+                  }
+                }
+
                 const visibleShelterOtp = routeData.shelterDeliveryOtpCode || deliveryOtpMeta?.dashboardOtp || ''
                 const report = reportForms[pickup.id]
 
@@ -594,6 +609,20 @@ export default function ShelterDashboard() {
                         <span className="text-blue-300">{secondsAgo !== null ? `${secondsAgo}s ago` : 'Pending'}</span>
                       </div>
                     </div>
+
+                    {pickup.status === 'IN_PROGRESS' && (
+                      <div className="mt-3">
+                        {deliveryBlockReason ? (
+                          <span className="inline-flex items-center rounded-full bg-yellow-500 bg-opacity-20 border border-yellow-500 border-opacity-40 px-3 py-1 text-[11px] font-semibold text-yellow-300">
+                            ⏳ {deliveryBlockReason}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-full bg-green-500 bg-opacity-20 border border-green-500 border-opacity-40 px-3 py-1 text-[11px] font-semibold text-green-300">
+                            ✅ All delivery checks complete, driver can mark delivered
+                          </span>
+                        )}
+                      </div>
+                    )}
 
                     {pickup.driver?.phone && (
                       <a

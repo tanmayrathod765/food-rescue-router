@@ -92,6 +92,13 @@ const delivered = async (req, res, next) => {
       })
     }
 
+    if (!routeData.deliveryPhotoVerifiedAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Restaurant must verify delivery photo before marking delivered'
+      })
+    }
+
     const result = await markDelivered(id, driverId)
     res.json(result)
   } catch (error) {

@@ -1,6 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 
+function resolveSocketUrl() {
+  const configuredUrl = import.meta.env.VITE_SOCKET_URL
+  if (configuredUrl) return configuredUrl
+
+  if (typeof window !== 'undefined') {
+    const { hostname, origin } = window.location
+    const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+    return isLocal ? 'http://localhost:5000' : origin
+  }
+
+  return 'http://localhost:5000'
+}
+
 export const useSocket = () => {
   const socketRef = useRef(null)
   const eventCounterRef = useRef(0)
@@ -8,8 +21,10 @@ export const useSocket = () => {
   const [events, setEvents] = useState([])
 
   useEffect(() => {
+    const socketUrl = resolveSocketUrl()
+
     socketRef.current = io(
-      import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000',
+      socketUrl,
       {
         transports: ['polling'],
         upgrade: false,

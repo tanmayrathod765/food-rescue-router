@@ -104,6 +104,7 @@ export default function DriverDashboard() {
   const [deliveryOtpVerified, setDeliveryOtpVerified] = useState(false)
   const [deliveryPhoto, setDeliveryPhoto] = useState(null)
   const [deliveryPhotoUploaded, setDeliveryPhotoUploaded] = useState(false)
+  const [deliveryPhotoVerifiedByRestaurant, setDeliveryPhotoVerifiedByRestaurant] = useState(false)
   const [photoUploading, setPhotoUploading] = useState(false)
   const lastHandledOtpEventIdRef = useRef(0)
   const locationWatchIdRef = useRef(null)
@@ -255,6 +256,14 @@ export default function DriverDashboard() {
       setDeliveryOtpVerified(true)
       setMsg('✅ Shelter delivery OTP verified. Upload proof photo and complete delivery.')
     }
+
+    if (
+      latestEvent.event === 'delivery:photo_verified' &&
+      latestEvent.data?.pickupId === myPickup.id
+    ) {
+      setDeliveryPhotoVerifiedByRestaurant(true)
+      setMsg('✅ Restaurant verified your delivery photo. You can now mark as delivered.')
+    }
   }, [events, myPickup, selectedDriver])
 
   useEffect(() => {
@@ -266,6 +275,7 @@ export default function DriverDashboard() {
     setDeliveryOtpVerified(false)
     setDeliveryPhoto(null)
     setDeliveryPhotoUploaded(false)
+    setDeliveryPhotoVerifiedByRestaurant(false)
   }, [myPickup?.id, selectedDriver?.id])
 
   useEffect(() => {
@@ -273,6 +283,7 @@ export default function DriverDashboard() {
     if (routeData && typeof routeData === 'object' && !Array.isArray(routeData)) {
       setDeliveryOtpVerified(Boolean(routeData.deliveryOtpVerifiedAt))
       setDeliveryPhotoUploaded(Boolean(routeData.deliveryPhotoUrl))
+      setDeliveryPhotoVerifiedByRestaurant(Boolean(routeData.deliveryPhotoVerifiedAt))
     }
   }, [myPickup?.routeData])
 
@@ -404,7 +415,8 @@ export default function DriverDashboard() {
       })
       setDeliveryPhoto(null)
       setDeliveryPhotoUploaded(true)
-      setMsg('📸 Photo uploaded! Restaurant has been notified.')
+      setDeliveryPhotoVerifiedByRestaurant(false)
+      setMsg('📸 Photo uploaded! Waiting for restaurant verification.')
     } catch (error) {
       console.error(error)
       setMsg('❌ Photo upload failed')
@@ -449,6 +461,10 @@ export default function DriverDashboard() {
     }
     if (!deliveryPhotoUploaded) {
       setMsg('❌ Upload delivery proof photo before marking delivered')
+      return
+    }
+    if (!deliveryPhotoVerifiedByRestaurant) {
+      setMsg('❌ Restaurant must verify delivery photo before completion')
       return
     }
     try {
@@ -801,11 +817,17 @@ export default function DriverDashboard() {
                           {deliveryPhotoUploaded && (
                             <p className="text-green-400 text-xs mt-2">✅ Delivery proof uploaded</p>
                           )}
+                          {deliveryPhotoUploaded && !deliveryPhotoVerifiedByRestaurant && (
+                            <p className="text-yellow-400 text-xs mt-2">⏳ Waiting for restaurant verification</p>
+                          )}
+                          {deliveryPhotoVerifiedByRestaurant && (
+                            <p className="text-green-400 text-xs mt-2">✅ Restaurant verified delivery proof</p>
+                          )}
                         </div>
 
                         <button
                           onClick={handleDelivered}
-                          disabled={!deliveryOtpVerified || !deliveryPhotoUploaded}
+                          disabled={!deliveryOtpVerified || !deliveryPhotoUploaded || !deliveryPhotoVerifiedByRestaurant}
                           className="w-full bg-green-500 hover:bg-green-400 disabled:bg-gray-700 disabled:text-gray-400 text-black font-bold py-3 rounded-xl transition-all"
                         >
                           ✅ Mark as Delivered

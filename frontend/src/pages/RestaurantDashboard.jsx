@@ -6,7 +6,6 @@ import { useSocket } from '../hooks/useSocket'
 import FoodPassport from '../components/FoodPassport'
 import FoodSafetyBadge from '../components/FoodSafetyBadge'
 import ETADisplay from '../components/ETADisplay'
-import ShelterMiniMap from '../components/ShelterMiniMap'
 
 function getStatusColor(status) {
   const colors = {
@@ -30,6 +29,36 @@ function getStatusEmoji(status) {
   return emojis[status] || '❓'
 }
 
+function formatDateTimeLocalNow() {
+  const now = new Date()
+  now.setSeconds(0, 0)
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day}T${hours}:${minutes}`
+}
+
+function getScoreTone(score) {
+  if (score >= 85) {
+    return {
+      barClass: 'bg-green-500',
+      textClass: 'text-green-300'
+    }
+  }
+  if (score >= 60) {
+    return {
+      barClass: 'bg-yellow-500',
+      textClass: 'text-yellow-300'
+    }
+  }
+  return {
+    barClass: 'bg-red-500',
+    textClass: 'text-red-300'
+  }
+}
+
 export default function RestaurantDashboard() {
   const { user, logout } = useAuth()
   const { events } = useSocket()
@@ -43,6 +72,7 @@ export default function RestaurantDashboard() {
   const [myBadges, setMyBadges] = useState([])
   const [donorLeaderboard, setDonorLeaderboard] = useState([])
   const [deliveryPhotos, setDeliveryPhotos] = useState({})
+  const [minClosingTime, setMinClosingTime] = useState(formatDateTimeLocalNow())
   const [loading, setLoading] = useState(false)
   const [successMsg, setSuccessMsg] = useState('')
   const [safetyPreview, setSafetyPreview] = useState(null)
@@ -112,13 +142,33 @@ export default function RestaurantDashboard() {
       if (res.data.photoUrl) {
         setDeliveryPhotos(prev => ({
           ...prev,
-          [pickupId]: `${api.defaults.baseURL}${res.data.photoUrl}`
+          [pickupId]: {
+            url: `${api.defaults.baseURL}${res.data.photoUrl}`,
+            verifiedAt: res.data.verifiedAt || null,
+            verifiedByDonorId: res.data.verifiedByDonorId || null
+          }
         }))
       }
     } catch {
       // Ignore missing photo and keep waiting state.
     }
   }, [])
+
+  const verifyDeliveryPhoto = useCallback(async (pickupId) => {
+    try {
+      await api.post(`/api/pickups/${pickupId}/verify-delivery-photo`)
+      await fetchDeliveryPhoto(pickupId)
+      if (isAdminView) {
+        await fetchAdminSelectedDonor()
+      } else {
+        await fetchMyProfile()
+      }
+      setSuccessMsg('Delivery photo verified. Driver can now complete delivery.')
+      setTimeout(() => setSuccessMsg(''), 4000)
+    } catch (error) {
+      alert(error?.response?.data?.message || 'Could not verify delivery photo')
+    }
+  }, [fetchAdminSelectedDonor, fetchDeliveryPhoto, fetchMyProfile, isAdminView])
 
   useEffect(() => {
     if (isAdminView) {
@@ -199,9 +249,17 @@ export default function RestaurantDashboard() {
   }, [form])
 
   useEffect(() => {
+    const intervalId = setInterval(() => {
+      setMinClosingTime(formatDateTimeLocalNow())
+    }, 30000)
+
+    return () => clearInterval(intervalId)
+  }, [])
+
+  useEffect(() => {
     const postings = myProfile?.foodPostings || []
     postings.forEach(posting => {
-      if (posting.status === 'DELIVERED' && posting.pickup?.id) {
+      if (posting.pickup?.id && posting.pickup?.routeData?.deliveryPhotoUrl) {
         fetchDeliveryPhoto(posting.pickup.id)
       }
     })
@@ -215,8 +273,16 @@ export default function RestaurantDashboard() {
       fetchDeliveryPhoto(photoEvent.data.pickupId)
     }
 
-    const otpEvent = events.find(e => e.event === 'otp:generated' || e.event === 'otp:restaurant_notified' || e.event === 'otp:verified')
-    if (otpEvent) {
+    const refreshEvent = events.find(e => {
+      return [
+        'otp:generated',
+        'otp:restaurant_notified',
+        'otp:verified',
+        'delivery:photo_uploaded',
+        'delivery:photo_verified'
+      ].includes(e.event)
+    })
+    if (refreshEvent) {
       if (isAdminView) {
         fetchAdminSelectedDonor().catch(console.error)
       } else {
@@ -228,6 +294,12 @@ export default function RestaurantDashboard() {
   const handleSubmit = async () => {
     if (!myProfile?.id || !form.quantityKg || !form.closingTime) {
       alert('Quantity and closing time are required')
+      return
+    }
+
+    const closingTimestamp = new Date(form.closingTime).getTime()
+    if (!Number.isFinite(closingTimestamp) || closingTimestamp <= Date.now()) {
+      alert('Pickup deadline must be in the future')
       return
     }
 
@@ -423,6 +495,7 @@ export default function RestaurantDashboard() {
               type="datetime-local"
               value={form.closingTime}
               onChange={e => setForm(prev => ({ ...prev, closingTime: e.target.value }))}
+              min={minClosingTime}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-green-400"
             />
           </div>
@@ -623,7 +696,6 @@ export default function RestaurantDashboard() {
                             <p className="text-white">{posting.pickup.shelter.acceptingTill}</p>
                           </div>
                         </div>
-                        {myProfile && <ShelterMiniMap shelter={posting.pickup.shelter} donor={myProfile} />}
                       </div>
                     )}
 
@@ -647,19 +719,35 @@ export default function RestaurantDashboard() {
                       </div>
                     )}
 
-                    {posting.status === 'DELIVERED' && posting.pickup?.id && (
+                    {(posting.pickup?.status === 'IN_PROGRESS' || posting.status === 'DELIVERED' || posting.pickup?.routeData?.deliveryPhotoUrl) && posting.pickup?.id && (
                       <div className="mt-3">
-                        {deliveryPhotos[posting.pickup.id] ? (
+                        {deliveryPhotos[posting.pickup.id]?.url ? (
                           <div>
                             <p className="text-gray-400 text-xs mb-2">📸 Delivery Proof:</p>
                             <img
-                              src={deliveryPhotos[posting.pickup.id]}
+                              src={deliveryPhotos[posting.pickup.id].url}
                               alt="Delivery proof"
                               className="w-full rounded-xl border border-gray-700 max-h-48 object-cover"
                             />
-                            <p className="text-green-400 text-xs mt-1">
-                              ✅ Verified delivery by {posting.pickup?.driver?.name}
-                            </p>
+                            {deliveryPhotos[posting.pickup.id].verifiedAt ? (
+                              <p className="text-green-400 text-xs mt-1">
+                                ✅ Photo verified by restaurant
+                              </p>
+                            ) : (
+                              <div className="mt-2">
+                                {!isAdminView && (
+                                  <button
+                                    onClick={() => verifyDeliveryPhoto(posting.pickup.id)}
+                                    className="w-full bg-green-500 bg-opacity-20 border border-green-500 text-green-300 font-bold py-2 rounded-lg text-sm"
+                                  >
+                                    Verify Delivery Photo
+                                  </button>
+                                )}
+                                <p className="text-yellow-400 text-xs mt-1">
+                                  ⏳ Driver can complete delivery only after your verification.
+                                </p>
+                              </div>
+                            )}
                           </div>
                         ) : (
                           <p className="text-gray-600 text-xs">📸 Waiting for delivery photo from driver...</p>
@@ -667,14 +755,54 @@ export default function RestaurantDashboard() {
                       </div>
                     )}
 
-                    {posting.safetyScore !== undefined && (
-                      <div className="mt-3">
-                        <FoodSafetyBadge
-                          score={posting.safetyScore}
-                          label={posting.safetyScore >= 90 ? 'Safe' : posting.safetyScore >= 70 ? 'Consume Soon' : posting.safetyScore >= 50 ? 'Urgent' : 'Risk'}
-                          emoji={posting.safetyScore >= 90 ? '✅' : posting.safetyScore >= 70 ? '⚠️' : posting.safetyScore >= 50 ? '🔶' : '❌'}
-                          recommendation={posting.safetyScore >= 90 ? 'Food is fresh' : 'Deliver as soon as possible'}
-                        />
+                    {(posting.safetyScore !== undefined || posting.urgencyScore !== undefined) && (
+                      <div className="mt-3 bg-gray-900 rounded-xl border border-gray-700 p-3">
+                        <p className="text-xs font-bold text-gray-300 mb-2">Safety and Urgency Breakdown</p>
+
+                        {posting.safetyScore !== undefined && (
+                          <div className="mb-3">
+                            <div className="flex items-center justify-between text-xs mb-1">
+                              <span className="text-gray-400">Safety Score</span>
+                              <span className={`${getScoreTone(posting.safetyScore).textClass} font-bold`}>{posting.safetyScore}/100</span>
+                            </div>
+                            <div className="w-full bg-gray-700 rounded-full h-2">
+                              <div
+                                className={`h-2 rounded-full ${getScoreTone(posting.safetyScore).barClass}`}
+                                style={{ width: `${Math.max(0, Math.min(100, posting.safetyScore))}%` }}
+                              />
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Safety formula: (Shelf-life remaining 60% + time till deadline 40%) x quantity factor (max 1.2x)
+                            </p>
+                          </div>
+                        )}
+
+                        {posting.urgencyScore !== undefined && (
+                          <div className="mb-2">
+                            <div className="flex items-center justify-between text-xs mb-1">
+                              <span className="text-gray-400">Urgency Score</span>
+                              <span className={`${getScoreTone(posting.urgencyScore).textClass} font-bold`}>{posting.urgencyScore}/100</span>
+                            </div>
+                            <div className="w-full bg-gray-700 rounded-full h-2">
+                              <div
+                                className={`h-2 rounded-full ${getScoreTone(posting.urgencyScore).barClass}`}
+                                style={{ width: `${Math.max(0, Math.min(100, posting.urgencyScore))}%` }}
+                              />
+                            </div>
+                            <p className="text-[11px] text-gray-500 mt-1">
+                              Urgency formula: (1000/minutes left) x food type weight x quantity factor (max 1.5x) x safety-risk boost.
+                            </p>
+                          </div>
+                        )}
+
+                        {posting.safetyScore !== undefined && (
+                          <FoodSafetyBadge
+                            score={posting.safetyScore}
+                            label={posting.safetyScore >= 90 ? 'Safe' : posting.safetyScore >= 70 ? 'Consume Soon' : posting.safetyScore >= 50 ? 'Urgent' : 'Risk'}
+                            emoji={posting.safetyScore >= 90 ? '✅' : posting.safetyScore >= 70 ? '⚠️' : posting.safetyScore >= 50 ? '🔶' : '❌'}
+                            recommendation={posting.safetyScore >= 90 ? 'Food is fresh' : 'Deliver as soon as possible'}
+                          />
+                        )}
                       </div>
                     )}
 

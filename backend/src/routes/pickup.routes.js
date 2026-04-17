@@ -288,7 +288,7 @@ router.post('/:id/verify-delivery-otp', protect, authorize('DRIVER'), async (req
 	}
 })
 
-router.post('/:id/delivery-photo', protect, upload.single('photo'), async (req, res) => {
+router.post('/:id/delivery-photo', protect, authorize('DRIVER'), upload.single('photo'), async (req, res) => {
 	try {
 		if (!req.file) {
 			return res.status(400).json({ success: false, message: 'Photo file is required' })
@@ -303,6 +303,10 @@ router.post('/:id/delivery-photo', protect, upload.single('photo'), async (req, 
 			return res.status(404).json({ success: false, message: 'Pickup not found' })
 		}
 
+		if (existingPickup.driverId !== req.user.entityId) {
+			return res.status(403).json({ success: false, message: 'Only assigned driver can upload delivery photo' })
+		}
+
 		const photoUrl = `/uploads/delivery-photos/${req.file.filename}`
 		const currentRouteData = existingPickup.routeData && typeof existingPickup.routeData === 'object' && !Array.isArray(existingPickup.routeData)
 			? existingPickup.routeData
@@ -313,7 +317,10 @@ router.post('/:id/delivery-photo', protect, upload.single('photo'), async (req, 
 			data: {
 				routeData: {
 					...currentRouteData,
-					deliveryPhotoUrl: photoUrl
+					deliveryPhotoUrl: photoUrl,
+					deliveryPhotoUploadedAt: new Date().toISOString(),
+					deliveryPhotoVerifiedAt: null,
+					deliveryPhotoVerifiedByDonorId: null
 				}
 			}
 		})
@@ -331,6 +338,56 @@ router.post('/:id/delivery-photo', protect, upload.single('photo'), async (req, 
 	}
 })
 
+router.post('/:id/verify-delivery-photo', protect, authorize('RESTAURANT'), async (req, res) => {
+	try {
+		const pickup = await prisma.pickup.findUnique({
+			where: { id: req.params.id },
+			include: { foodPosting: true }
+		})
+
+		if (!pickup) {
+			return res.status(404).json({ success: false, message: 'Pickup not found' })
+		}
+
+		if (pickup.foodPosting?.donorId !== req.user.entityId) {
+			return res.status(403).json({ success: false, message: 'Only posting restaurant can verify delivery photo' })
+		}
+
+		const currentRouteData = pickup.routeData && typeof pickup.routeData === 'object' && !Array.isArray(pickup.routeData)
+			? pickup.routeData
+			: {}
+
+		if (!currentRouteData.deliveryPhotoUrl) {
+			return res.status(400).json({ success: false, message: 'Driver has not uploaded delivery photo yet' })
+		}
+
+		const verifiedAt = new Date().toISOString()
+
+		await prisma.pickup.update({
+			where: { id: pickup.id },
+			data: {
+				routeData: {
+					...currentRouteData,
+					deliveryPhotoVerifiedAt: verifiedAt,
+					deliveryPhotoVerifiedByDonorId: req.user.entityId
+				}
+			}
+		})
+
+		emitToAll('delivery:photo_verified', {
+			pickupId: pickup.id,
+			foodPostingId: pickup.foodPostingId,
+			donorId: req.user.entityId,
+			verifiedAt,
+			message: 'Restaurant verified delivery proof photo'
+		})
+
+		res.json({ success: true, message: 'Delivery photo verified by restaurant', verifiedAt })
+	} catch (error) {
+		res.status(500).json({ success: false, message: error.message })
+	}
+})
+
 router.get('/:id/delivery-photo', protect, async (req, res) => {
 	try {
 		const pickup = await prisma.pickup.findUnique({
@@ -343,7 +400,9 @@ router.get('/:id/delivery-photo', protect, async (req, res) => {
 
 		res.json({
 			success: true,
-			photoUrl: routeData.deliveryPhotoUrl || null
+			photoUrl: routeData.deliveryPhotoUrl || null,
+			verifiedAt: routeData.deliveryPhotoVerifiedAt || null,
+			verifiedByDonorId: routeData.deliveryPhotoVerifiedByDonorId || null
 		})
 	} catch (error) {
 		res.status(500).json({ success: false, message: error.message })

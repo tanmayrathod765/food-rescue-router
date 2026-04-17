@@ -126,15 +126,6 @@ async function claimPickup(foodPostingId, driverId, shelterId, routeData = null)
         }
 
         assignedShelterId = bestShelter.shelter.id
-
-        await tx.shelter.update({
-          where: { id: assignedShelterId },
-          data: {
-            currentCommittedKg: {
-              increment: Number(currentPickup.quantityKg)
-            }
-          }
-        })
       }
 
       const driver = await tx.driver.findUnique({
@@ -405,7 +396,7 @@ async function markDelivered(pickupId, driverId) {
     if (!pickup) return { success: false, message: 'Pickup not found' }
 
     // Transaction — delivery + driver stats ek saath update
-    await prisma.$transaction([
+    const transactionOps = [
       prisma.pickup.update({
         where: { id: pickupId },
         data: {
@@ -424,7 +415,22 @@ async function markDelivered(pickupId, driverId) {
           totalKgRescued: { increment: pickup.foodPosting.quantityKg }
         }
       })
-    ])
+    ]
+
+    if (pickup.shelterId) {
+      transactionOps.push(
+        prisma.shelter.update({
+          where: { id: pickup.shelterId },
+          data: {
+            currentCommittedKg: {
+              increment: pickup.foodPosting.quantityKg
+            }
+          }
+        })
+      )
+    }
+
+    await prisma.$transaction(transactionOps)
 
     emitToAll('pickup:delivered', {
       pickupId,
