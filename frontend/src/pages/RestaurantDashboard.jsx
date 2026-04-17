@@ -61,7 +61,7 @@ function getScoreTone(score) {
 
 export default function RestaurantDashboard() {
   const { user, logout } = useAuth()
-  const { events } = useSocket()
+  const { events } = useSocket(user)
   const navigate = useNavigate()
   const isAdminView = user?.role === 'ADMIN'
 
@@ -390,11 +390,9 @@ export default function RestaurantDashboard() {
             <p className="text-gray-400 text-sm">
               {myProfile?.address || 'Fetching location...'}
             </p>
-            {Number.isFinite(Number(myProfile?.lat)) && Number.isFinite(Number(myProfile?.lng)) && (
-              <p className="text-gray-500 text-xs mt-1">
-                Lat: {Number(myProfile.lat).toFixed(5)}, Lng: {Number(myProfile.lng).toFixed(5)}
-              </p>
-            )}
+            <p className="text-gray-500 text-xs mt-1">
+              Location name: {myProfile?.address || 'Location unavailable'}
+            </p>
           </div>
           <div className="ml-auto flex items-center gap-2">
             <span className="text-xs bg-green-500 bg-opacity-20 text-green-400 px-3 py-1 rounded-full border border-green-500 border-opacity-30">
@@ -642,9 +640,7 @@ export default function RestaurantDashboard() {
                           <div>
                             <span className="text-gray-400 text-xs">Live Location:</span>
                             <p className="text-white text-xs">
-                              {Number.isFinite(posting.pickup.driver.currentLat) && Number.isFinite(posting.pickup.driver.currentLng)
-                                ? `${posting.pickup.driver.currentLat.toFixed(4)}, ${posting.pickup.driver.currentLng.toFixed(4)}`
-                                : 'Updating...'}
+                              {getDriverLocationLabel(posting.pickup)}
                             </p>
                           </div>
                         </div>
@@ -682,9 +678,7 @@ export default function RestaurantDashboard() {
                           <div>
                             <span className="text-gray-400 text-xs">Location:</span>
                             <p className="text-white text-xs">
-                              {Number.isFinite(posting.pickup.shelter.lat) && Number.isFinite(posting.pickup.shelter.lng)
-                                ? `${posting.pickup.shelter.lat.toFixed(4)}, ${posting.pickup.shelter.lng.toFixed(4)}`
-                                : 'Location unavailable'}
+                              {posting.pickup.shelter.address || posting.pickup.shelter.name || 'Location unavailable'}
                             </p>
                           </div>
                           <div>
@@ -845,4 +839,20 @@ export default function RestaurantDashboard() {
       </div>
     </div>
   )
+}
+
+function getDriverLocationLabel(pickup) {
+  const hasLiveGps =
+    Number.isFinite(Number(pickup?.driver?.currentLat)) &&
+    Number.isFinite(Number(pickup?.driver?.currentLng))
+
+  if (!hasLiveGps) {
+    return 'Updating...'
+  }
+
+  if (pickup?.status === 'IN_PROGRESS') {
+    return `Near ${pickup?.shelter?.name || 'delivery route'}`
+  }
+
+  return `Near ${pickup?.foodPosting?.donor?.name || 'restaurant pickup point'}`
 }

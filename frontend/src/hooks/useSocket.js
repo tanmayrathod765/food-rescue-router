@@ -14,7 +14,40 @@ function resolveSocketUrl() {
   return 'http://localhost:5000'
 }
 
-export const useSocket = () => {
+function shouldCaptureEvent(user, event, data) {
+  if (!user) return false
+  if (user.role === 'ADMIN') return true
+
+  const entityId = user.entityId
+  const scopedEntityId = data?.userId || data?.entityId || null
+
+  if (scopedEntityId && scopedEntityId !== entityId && scopedEntityId !== user.id) {
+    return false
+  }
+
+  if (user.role === 'DRIVER' && data?.driverId && data.driverId !== entityId) {
+    return false
+  }
+
+  if (user.role === 'SHELTER' && data?.shelterId && data.shelterId !== entityId) {
+    return false
+  }
+
+  if (user.role === 'RESTAURANT') {
+    const donorScopedId = data?.donorId || data?.restaurantId || null
+    if (donorScopedId && donorScopedId !== entityId) {
+      return false
+    }
+  }
+
+  if (event.startsWith('notification:') && !scopedEntityId && user.role !== 'ADMIN') {
+    return false
+  }
+
+  return true
+}
+
+export const useSocket = (user = null) => {
   const socketRef = useRef(null)
   const eventCounterRef = useRef(0)
   const [connected, setConnected] = useState(false)
@@ -78,6 +111,9 @@ export const useSocket = () => {
 
     algorithmEvents.forEach(event => {
       socketRef.current.on(event, (data) => {
+        if (!shouldCaptureEvent(user, event, data)) {
+          return
+        }
         const eventId = eventCounterRef.current + 1
         eventCounterRef.current = eventId
         setEvents(prev => [{
@@ -92,7 +128,7 @@ export const useSocket = () => {
     return () => {
       if (socketRef.current) socketRef.current.disconnect()
     }
-  }, [])
+  }, [user])
 
   const emit = (event, data) => {
     if (socketRef.current) socketRef.current.emit(event, data)

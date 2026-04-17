@@ -42,6 +42,22 @@ function estimateEtaMinutes(driverLat, driverLng, shelterLat, shelterLng) {
   }
 }
 
+function getDriverLocationLabel(pickup, shelterName) {
+  const hasLiveGps =
+    Number.isFinite(Number(pickup?.driver?.currentLat)) &&
+    Number.isFinite(Number(pickup?.driver?.currentLng))
+
+  if (!hasLiveGps) {
+    return 'Unavailable'
+  }
+
+  if (pickup?.status === 'CLAIMED') {
+    return `Near ${pickup?.foodPosting?.donor?.name || 'restaurant pickup point'}`
+  }
+
+  return `Near ${shelterName || pickup?.shelter?.name || 'delivery destination'}`
+}
+
 export default function ShelterDashboard() {
   const [myShelter, setMyShelter] = useState(null)
   const [incomingPickups, setIncomingPickups] = useState([])
@@ -62,8 +78,8 @@ export default function ShelterDashboard() {
   const [clockTick, setClockTick] = useState(Date.now())
   const lastHandledEventIdRef = useRef(0)
 
-  const { connected, events } = useSocket()
   const { user, logout } = useAuth()
+  const { connected, events } = useSocket(user)
   const navigate = useNavigate()
 
   const isAdminView = user?.role === 'ADMIN'
@@ -319,20 +335,53 @@ export default function ShelterDashboard() {
   const handleGenerateDeliveryOtp = async (pickupId) => {
     try {
       const res = await api.post(`/api/pickups/${pickupId}/generate-delivery-otp`)
-      const dashboardOtp = res.data?.dashboardOtp || ''
-      const smsMode = res.data?.smsMode || 'none'
-      const shelterNotified = Boolean(res.data?.shelterNotified)
+      const payload = res.data?.data || res.data || {}
+      const dashboardOtp = payload.dashboardOtp || ''
+      const smsMode = payload.smsMode || 'none'
+      const shelterNotified = Boolean(payload.shelterNotified)
 
       setDeliveryOtpByPickup(prev => ({
         ...prev,
         [pickupId]: {
           dashboardOtp,
           smsMode,
-          shelterNotified
+          shelterNotified,
+          generatedAt: Date.now()
         }
       }))
 
-      setMsg('🔑 Delivery OTP generated and shown on shelter dashboard.')
+      // Ensure OTP is visible immediately in the active card even before next polling refresh.
+      setIncomingPickups(prev => prev.map(pickup => {
+        if (pickup.id !== pickupId) return pickup
+        const routeData = pickup.routeData && typeof pickup.routeData === 'object' && !Array.isArray(pickup.routeData)
+          ? pickup.routeData
+          : {}
+
+        return {
+          ...pickup,
+          routeData: {
+            ...routeData,
+            shelterDeliveryOtpCode: dashboardOtp || routeData.shelterDeliveryOtpCode || null
+          }
+        }
+      }))
+
+      setAdminAllPickups(prev => prev.map(pickup => {
+        if (pickup.id !== pickupId) return pickup
+        const routeData = pickup.routeData && typeof pickup.routeData === 'object' && !Array.isArray(pickup.routeData)
+          ? pickup.routeData
+          : {}
+
+        return {
+          ...pickup,
+          routeData: {
+            ...routeData,
+            shelterDeliveryOtpCode: dashboardOtp || routeData.shelterDeliveryOtpCode || null
+          }
+        }
+      }))
+
+      setMsg(dashboardOtp ? '🔑 Delivery OTP generated and shown on shelter dashboard.' : '⚠️ OTP generated but code not returned. Retry once.')
     } catch (error) {
       setMsg(`❌ ${error.response?.data?.message || 'Failed to generate delivery OTP'}`)
     }
@@ -596,7 +645,7 @@ export default function ShelterDashboard() {
                     <div className="space-y-1 text-xs text-gray-300">
                       <div className="flex justify-between"><span>Driver</span><span>{pickup.driver?.name || 'TBD'}</span></div>
                       <div className="flex justify-between"><span>Driver Phone</span><span>{pickup.driver?.phone || 'N/A'}</span></div>
-                      <div className="flex justify-between"><span>Live Location</span><span>{Number.isFinite(Number(pickup.driver?.currentLat)) && Number.isFinite(Number(pickup.driver?.currentLng)) ? `${Number(pickup.driver.currentLat).toFixed(5)}, ${Number(pickup.driver.currentLng).toFixed(5)}` : 'Unavailable'}</span></div>
+                      <div className="flex justify-between"><span>Live Location</span><span>{getDriverLocationLabel(pickup, activeShelter.name)}</span></div>
                       <div className="flex justify-between"><span>Food</span><span>{pickup.foodPosting?.quantityKg}kg • {pickup.foodPosting?.isVeg ? 'VEG' : 'NON-VEG'}</span></div>
                       <div className="flex justify-between">
                         <span>ETA</span>
@@ -633,15 +682,19 @@ export default function ShelterDashboard() {
                       </a>
                     )}
 
-                    {!isAdminView && ['CLAIMED', 'IN_PROGRESS'].includes(pickup.status) && (
+                    {['CLAIMED', 'IN_PROGRESS'].includes(pickup.status) && (
                       <div className="mt-3 bg-yellow-500 bg-opacity-10 border border-yellow-500 border-opacity-30 rounded-xl p-3">
                         <p className="text-yellow-300 text-xs font-bold mb-2">🔐 Delivery OTP (Shelter to Driver)</p>
-                        <button
-                          onClick={() => handleGenerateDeliveryOtp(pickup.id)}
-                          className="w-full bg-yellow-500 text-black font-bold py-2 rounded-lg text-sm"
-                        >
-                          Generate Delivery OTP
-                        </button>
+                        {!isAdminView ? (
+                          <button
+                            onClick={() => handleGenerateDeliveryOtp(pickup.id)}
+                            className="w-full bg-yellow-500 text-black font-bold py-2 rounded-lg text-sm"
+                          >
+                            Generate Delivery OTP
+                          </button>
+                        ) : (
+                          <p className="text-gray-300 text-xs">Admin preview is read-only. OTP can be generated by shelter account.</p>
+                        )}
                         <p className="text-gray-400 text-xs mt-2">Generate OTP anytime after assignment. Driver must verify before marking delivery complete.</p>
                         <p className="text-gray-500 text-xs">OTP delivery mode: dashboard</p>
                         {visibleShelterOtp && (
@@ -649,6 +702,9 @@ export default function ShelterDashboard() {
                             <p className="text-yellow-300 text-xs">Delivery OTP (share with assigned driver):</p>
                             <p className="text-yellow-400 font-bold tracking-widest">{visibleShelterOtp}</p>
                           </div>
+                        )}
+                        {!visibleShelterOtp && (
+                          <p className="text-yellow-300 text-xs mt-2">OTP not generated yet for this pickup.</p>
                         )}
                       </div>
                     )}

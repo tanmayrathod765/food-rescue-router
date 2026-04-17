@@ -88,6 +88,25 @@ function formatVehicleIcon(vehicleType) {
   return '🚛'
 }
 
+function getDriverLocationLabel(driver, pickup) {
+  const hasLiveGps =
+    Number.isFinite(Number(driver?.currentLat)) && Number.isFinite(Number(driver?.currentLng))
+
+  if (!hasLiveGps) {
+    return 'Location unavailable'
+  }
+
+  if (pickup?.status === 'CLAIMED') {
+    return `Near ${pickup.foodPosting?.donor?.name || 'restaurant pickup point'}`
+  }
+
+  if (pickup?.status === 'IN_PROGRESS') {
+    return `Near ${pickup.shelter?.name || 'delivery route'}`
+  }
+
+  return 'Live GPS active'
+}
+
 export default function DriverDashboard() {
   const [selectedDriver, setSelectedDriver] = useState(null)
   const [pickups, setPickups] = useState([])
@@ -97,6 +116,7 @@ export default function DriverDashboard() {
   const [otpInput, setOtpInput] = useState('')
   const [debugOtp, setDebugOtp] = useState('')
   const [otpLoading, setOtpLoading] = useState(false)
+  const [otpCooldownSeconds, setOtpCooldownSeconds] = useState(0)
   const [otpReadyForVerification, setOtpReadyForVerification] = useState(false)
   const [deliveryOtpInput, setDeliveryOtpInput] = useState('')
   const [deliveryOtpLoading, setDeliveryOtpLoading] = useState(false)
@@ -109,8 +129,8 @@ export default function DriverDashboard() {
   const lastHandledOtpEventIdRef = useRef(0)
   const locationWatchIdRef = useRef(null)
   const [profileError, setProfileError] = useState('')
-  const { connected, events } = useSocket()
   const { user, logout } = useAuth()
+  const { connected, events } = useSocket(user)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -270,6 +290,7 @@ export default function DriverDashboard() {
     setOtpReadyForVerification(false)
     setOtpInput('')
     setDebugOtp('')
+    setOtpCooldownSeconds(0)
     setDeliveryOtpReady(false)
     setDeliveryOtpInput('')
     setDeliveryOtpVerified(false)
@@ -286,6 +307,16 @@ export default function DriverDashboard() {
       setDeliveryPhotoVerifiedByRestaurant(Boolean(routeData.deliveryPhotoVerifiedAt))
     }
   }, [myPickup?.routeData])
+
+  useEffect(() => {
+    if (otpCooldownSeconds <= 0) return undefined
+
+    const timerId = setInterval(() => {
+      setOtpCooldownSeconds(prev => (prev > 0 ? prev - 1 : 0))
+    }, 1000)
+
+    return () => clearInterval(timerId)
+  }, [otpCooldownSeconds])
 
   const handleAvailability = async () => {
     if (!selectedDriver) return
@@ -341,6 +372,12 @@ export default function DriverDashboard() {
 
   const generateOTP = async () => {
     if (!myPickup) return
+    if (otpCooldownSeconds > 0) {
+      setMsg(`⏳ Wait ${otpCooldownSeconds}s before sending OTP again`)
+      return
+    }
+
+    setOtpCooldownSeconds(30)
     setOtpLoading(true)
     setOtpReadyForVerification(false)
     setDebugOtp('')
@@ -574,9 +611,7 @@ export default function DriverDashboard() {
                   {selectedDriver.vehicleType} • {selectedDriver.capacityKg}kg capacity • {selectedDriver.phone}
                 </p>
                 <p className="text-gray-500 text-xs mt-1">
-                  Live location: {Number.isFinite(Number(selectedDriver.currentLat)) && Number.isFinite(Number(selectedDriver.currentLng))
-                    ? `${Number(selectedDriver.currentLat).toFixed(5)}, ${Number(selectedDriver.currentLng).toFixed(5)}`
-                    : 'Not available'}
+                  Live location: {getDriverLocationLabel(selectedDriver, myPickup)}
                 </p>
               </div>
               <div className="ml-auto flex items-center gap-2">
@@ -725,10 +760,14 @@ export default function DriverDashboard() {
                         <div className="mb-3">
                           <button
                             onClick={generateOTP}
-                            disabled={otpLoading}
+                            disabled={otpLoading || otpCooldownSeconds > 0}
                             className="w-full bg-yellow-500 bg-opacity-20 border border-yellow-500 text-yellow-400 font-bold py-3 rounded-xl mb-2"
                           >
-                            {otpLoading ? '⏳ Sending OTP...' : '🔑 Send OTP to Restaurant'}
+                            {otpLoading
+                              ? '⏳ Sending OTP...'
+                              : otpCooldownSeconds > 0
+                                ? `⏳ Wait ${otpCooldownSeconds}s to resend OTP`
+                                : '🔑 Send OTP to Restaurant'}
                           </button>
 
                           <div className="bg-gray-800 rounded-xl p-4 border border-yellow-500 border-opacity-50">

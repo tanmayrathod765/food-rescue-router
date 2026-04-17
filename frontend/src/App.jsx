@@ -81,7 +81,7 @@ function NavBar({ events }) {
 
 function AppContent() {
   const { user } = useAuth()
-  const { events } = useSocket()
+  const { events } = useSocket(user)
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">

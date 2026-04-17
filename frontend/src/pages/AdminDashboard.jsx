@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import api from '../utils/api'
 import { useSocket } from '../hooks/useSocket'
+import { useAuth } from '../context/AuthContext'
 import LiveMap from '../components/Map/LiveMap'
 import StatsBar from '../components/StatsBar'
 import AlgorithmPanel from '../components/AlgorithmPanel'
 import SimulationControl from '../components/SimulationControl'
 import Leaderboard from '../components/Leaderboard'
 export default function AdminDashboard() {
+  const { user } = useAuth()
   const [drivers, setDrivers] = useState([])
   const [donors, setDonors] = useState([])
   const [shelters, setShelters] = useState([])
@@ -14,7 +16,7 @@ export default function AdminDashboard() {
   const [routes, setRoutes] = useState([])
   const [pickups, setPickups] = useState([])
   const [raceConditionsBlocked, setRaceConditionsBlocked] = useState(0)
-  const { connected, events } = useSocket()
+  const { connected, events } = useSocket(user)
   const [simLogs, setSimLogs] = useState([])
   const [simActive, setSimActive] = useState(false)
   const lastRefreshAtRef = useRef(0)
